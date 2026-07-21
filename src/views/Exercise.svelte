@@ -339,7 +339,7 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
         await waitForVoices(1500);
         if (hasThaiVoice()) {
           const summary = summaryTh(score, errors.length);
-          const fb = errors.length ? buildFeedback(errors[0].errorId, errors[0].target, errors[0].spoken) : null;
+          const fb = errors.length ? buildFeedback(errors[0].errorId, errors[0].target, errors[0].spoken, exercise.prompt) : null;
           const seq: Array<{ text: string; lang: "th" | "en"; rate?: number }> = [{ text: summary, lang: "th", rate: s.speakRate }];
           if (fb) seq.push({ text: fb.th, lang: "th", rate: s.speakRate });
           seq.push({ text: exercise.prompt, lang: "en", rate: 0.9 });
@@ -642,7 +642,7 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
           <span class="t-micro fg-muted" lang="th">คำที่ต้องแก้: {exercise.prompt.split(/\s+/)[worstWordIdx]}</span>
         {/if}
         {#each displayErrors as e}
-          {@const fb = buildFeedback(e.errorId, e.target, e.spoken)}
+          {@const fb = buildFeedback(e.errorId, e.target, e.spoken, exercise.prompt)}
           <div class="err-block">
             <span class="err-tag">{e.errorId}</span>
             <p class="t-body-lg" lang="th">{fb.th}</p>

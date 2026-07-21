@@ -287,6 +287,25 @@ export const EXERCISES: Exercise[] = [
   { id: "sent2-can-you-give-me-some-of-that-c", errorIds: ["E14"], type: "sentence", prompt: "Can you give me some of that cake", promptThai: "เธอช่วยให้เค้กนั้นฉันหน่อยได้ไหม", targetPhonemes: [], difficulty: 2 },
   { id: "sent2-they-would-like-to-come-for-lu", errorIds: ["E14"], type: "sentence", prompt: "They would like to come for lunch", promptThai: "พวกเขาอยากมากินมื้อเที่ยง", targetPhonemes: [], difficulty: 2 },
   { id: "sent2-i-would-like-to-see-a-photo-of", errorIds: ["E14"], type: "sentence", prompt: "I would like to see a photo of your dog", promptThai: "ฉันอยากเห็นรูปหมาของคุณ", targetPhonemes: [], difficulty: 2 },
+
+  // === Plural /z/ and /s/ drills ===
+  { id: "sent3-two-dogs-play-in-the-park", errorIds: ["E9"], type: "sentence", prompt: "Two dogs play in the park", promptThai: "หมาสองตัวเล่นในสวน", targetPhonemes: [], difficulty: 1 },
+  { id: "sent3-the-boys-like-toys-and-games", errorIds: ["E9"], type: "sentence", prompt: "The boys like toys and games", promptThai: "เด็กผู้ชายชอบของเล่นและเกม", targetPhonemes: [], difficulty: 1 },
+  { id: "sent3-she-buys-roses-for-her-friends", errorIds: ["E9"], type: "sentence", prompt: "She buys roses for her friends", promptThai: "เธอซื้อกุหลาบให้เพื่อน", targetPhonemes: [], difficulty: 2 },
+  { id: "sent3-three-boys-race-their-cars-on-", errorIds: ["E9"], type: "sentence", prompt: "Three boys race their cars on the road", promptThai: "เด็กชายสามคนแข่งรถบนถนน", targetPhonemes: [], difficulty: 2 },
+  { id: "sent3-the-girls-pick-flowers-in-the-", errorIds: ["E9"], type: "sentence", prompt: "The girls pick flowers in the garden", promptThai: "เด็กหญิงเด็ดดอกไม้ในสวน", targetPhonemes: [], difficulty: 2 },
+  { id: "sent3-dogs-love-bones-and-toys", errorIds: ["E9"], type: "sentence", prompt: "Dogs love bones and toys", promptThai: "หมารักกระดูกและของเล่น", targetPhonemes: [], difficulty: 1 },
+  { id: "sent3-the-children-have-books-and-pe", errorIds: ["E9"], type: "sentence", prompt: "The children have books and pens", promptThai: "เด็กๆ มีหนังสือและปากกา", targetPhonemes: [], difficulty: 2 },
+  { id: "sent3-she-sees-cats-and-dogs-in-the-", errorIds: ["E9"], type: "sentence", prompt: "She sees cats and dogs in the house", promptThai: "เธอเห็นแมวและหมาในบ้าน", targetPhonemes: [], difficulty: 2 },
+  { id: "sent3-the-boys-make-noise-with-their", errorIds: ["E9"], type: "sentence", prompt: "The boys make noise with their toys", promptThai: "เด็กผู้ชายส่งเสียงดังกับของเล่น", targetPhonemes: [], difficulty: 2 },
+  { id: "sent3-birds-sing-in-the-trees-every-", errorIds: ["E9"], type: "sentence", prompt: "Birds sing in the trees every morning", promptThai: "นกร้องเพลงบนต้นไม้ทุกเช้า", targetPhonemes: [], difficulty: 2 },
+  { id: "sent3-the-shops-sell-shoes-and-cloth", errorIds: ["E9"], type: "sentence", prompt: "The shops sell shoes and clothes", promptThai: "ร้านค้าขายรองเท้าและเสื้อผ้า", targetPhonemes: [], difficulty: 2 },
+  { id: "sent3-cars-and-buses-run-on-the-road", errorIds: ["E9"], type: "sentence", prompt: "Cars and buses run on the road", promptThai: "รถยนต์และรถบัสวิ่งบนถนน", targetPhonemes: [], difficulty: 2 },
+  { id: "sent3-the-kids-love-ice-cream-and-ch", errorIds: ["E9"], type: "sentence", prompt: "The kids love ice cream and chips", promptThai: "เด็กๆ ชอบไอศกรีมและชิปส์", targetPhonemes: [], difficulty: 2 },
+  { id: "sent3-three-cats-sit-on-the-mat", errorIds: ["E3"], type: "sentence", prompt: "Three cats sit on the mat", promptThai: "แมวสามตัวนั่งบนเสื่อ", targetPhonemes: [], difficulty: 1 },
+  { id: "sent3-she-has-books-and-cups-on-the-", errorIds: ["E3"], type: "sentence", prompt: "She has books and cups on the desk", promptThai: "เธอมีหนังสือและถ้วยบนโต๊ะ", targetPhonemes: [], difficulty: 2 },
+  { id: "sent3-the-kids-like-chips-and-cheese", errorIds: ["E3"], type: "sentence", prompt: "The kids like chips and cheese", promptThai: "เด็กๆ ชอบชิปส์และชีส", targetPhonemes: [], difficulty: 2 },
+  { id: "sent3-he-has-two-pens-and-three-book", errorIds: ["E3"], type: "sentence", prompt: "He has two pens and three books", promptThai: "เขามีปากกาสองด้ามและหนังสือสามเล่ม", targetPhonemes: [], difficulty: 2 },
 ];
 
 export function exercisesByError(eid: ErrorId): Exercise[] {

@@ -497,4 +497,18 @@ export const EXPANDED_DICT: Record<string, Phoneme[]> = {
   wife: ["w", "aɪ", "f"],
   wolf: ["w", "ʊ", "l", "f"],
   zoo: ["z", "uː"],
+
+  // === Plural drill vocabulary ===
+  birds: ["b", "ɜː", "d", "z"],
+  bones: ["b", "əʊ", "n", "z"],
+  buses: ["ˈ", "b", "ʌ", "s", "ɪ", "z"],
+  cups: ["k", "ʌ", "p", "s"],
+  kids: ["k", "ɪ", "d", "z"],
+  noise: ["n", "ɔɪ", "z"],
+  pens: ["p", "e", "n", "z"],
+  pick: ["p", "ɪ", "k"],
+  race: ["r", "eɪ", "s"],
+  shops: ["ʃ", "ɒ", "p", "s"],
+  trees: ["t", "r", "iː", "z"],
+  two: ["t", "uː"],
 };
