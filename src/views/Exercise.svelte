@@ -196,7 +196,7 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
     }
     // Compute waveform bars for visual comparison
     userWaveBars = pcmToBars(pcmData, 16000, 64).bars;
-    refWaveBars = syntheticReferenceBars(exercise.targetPhonemes.length, 64);
+    refWaveBars = syntheticReferenceBars(resolvedTargetPhonemes.length, 64);
     if (lastAudioUrl) URL.revokeObjectURL(lastAudioUrl);
     lastAudioUrl = URL.createObjectURL(pcmToWav(pcmData));
 
@@ -224,7 +224,9 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
       console.log("[Siang Dee] Recognized phonemes:", recognized.map((r) => r.token).join(" "), "| target phonemes:", exercise.targetPhonemes.join(" "));
       const spoken = recognized.map((r) => r.token);
       const confs = recognized.map((r) => r.confidence);
-      const target = exercise.targetPhonemes as Phoneme[];
+      const target = (exercise.targetPhonemes.length > 0
+        ? exercise.targetPhonemes
+        : sentenceToPhonemes(exercise.prompt).phonemes) as Phoneme[];
 
       // Recognition failure: Whisper/Web Speech returned no usable phonemes.
       // But the user clearly spoke — don't trap them in an endless "try again"
@@ -504,9 +506,15 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   const catLabel = $derived(exercise.errorIds.map((eid: string) => `${eid} ${ERROR_CATEGORIES[eid as ErrorId]?.nameTh ?? ""}`).join(" · "));
 
   // Word boundaries for sentence exercises — group phoneme chips by word
-  const wordBoundaries: number[] | null = $derived(exercise.type === "sentence"
-    ? sentenceToPhonemes(exercise.prompt).boundaries
-    : null);
+  const sentenceParsed = $derived(exercise.type === "sentence" ? sentenceToPhonemes(exercise.prompt) : null);
+  const wordBoundaries: number[] | null = $derived(sentenceParsed?.boundaries ?? null);
+
+  // Resolved target phonemes — use sentenceToPhonemes for sentences with empty targetPhonemes
+  const resolvedTargetPhonemes: Phoneme[] = $derived(
+    exercise.targetPhonemes.length > 0
+      ? (exercise.targetPhonemes as Phoneme[])
+      : (sentenceParsed?.phonemes ?? [])
+  );
 
   // Per-word average score for sentence mode (highlight word groups)
   function wordScoreAvg(wi: number): number {
@@ -553,7 +561,7 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
     <div class="word t-display-xl">{exercise.prompt}</div>
     <div class="thai t-body-lg fg-muted" lang="th">{exercise.promptThai}</div>
     <div class="ipa-field bg-inset">
-      <span class="t-ipa">/{exercise.targetPhonemes.join("")}/</span>
+      <span class="t-ipa">/{(exercise.targetPhonemes.length > 0 ? exercise.targetPhonemes : sentenceToPhonemes(exercise.prompt).phonemes).join("")}/</span>
     </div>
   </div>
 
