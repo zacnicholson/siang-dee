@@ -13,7 +13,6 @@
 
   let lang = $state<Lang>("th");
   let view = $derived($route);
-  let showOnboarding = $state(false);
   let loaded = $state(false);
 
   onMount(async () => {
@@ -21,10 +20,10 @@
     const s = await loadSettings();
     lang = s.uiLang;
     loaded = true;
-    if (!s.onboarded) {
-      showOnboarding = true;
-    }
   });
+
+  // Reactive: when settings.onboarded flips to true, onboarding disappears automatically
+  const showOnboarding = $derived(loaded && $settings ? !$settings.onboarded : false);
 
   $effect(() => {
     const s = $settings;
