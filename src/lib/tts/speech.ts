@@ -33,9 +33,16 @@ function voiceScore(v: SpeechSynthesisVoice, lang: "th" | "en"): number {
   if (lang === "en") {
     // Premium/natural voices first
     if (name.includes("google")) score += 100;
-    if (name.includes("samantha")) score += 80;
-    if (name.includes("daniel")) score += 70;
-    if (name.includes("karen")) score += 65;
+    // iOS enhanced/premium voices (much better than the robotic default)
+    if (name.includes("samantha") && (name.includes("enhanced") || name.includes("premium"))) score += 95;
+    else if (name.includes("samantha")) score += 80;
+    if (name.includes("aaron") || name.includes("nick")) score += 90; // new iOS natural voices
+    if (name.includes("daniel") && (name.includes("enhanced") || name.includes("premium"))) score += 88;
+    else if (name.includes("daniel")) score += 70;
+    if (name.includes("karen") && (name.includes("enhanced") || name.includes("premium"))) score += 85;
+    else if (name.includes("karen")) score += 65;
+    if (name.includes("serena")) score += 82;
+    if (name.includes("ava")) score += 82;
     if (name.includes("moira")) score += 60;
     if (name.includes("tessa")) score += 55;
     if (name.includes("fiona")) score += 50;

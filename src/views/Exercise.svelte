@@ -9,7 +9,8 @@
   import { pcmToBars, syntheticReferenceBars } from "../lib/audio/waveform";
   import WaveformCompare from "../components/WaveformCompare.svelte";
   import MouthDiagram from "../components/MouthDiagram.svelte";
-  import { getRecognizer, needsModelDownload, preloadModel, type RecognizedPhoneme } from "../lib/audio/recognizer";
+  import { getRecognizer, needsModelDownload, preloadModel, type RecognizedPhoneme, type Recognizer } from "../lib/audio/recognizer";
+  import type { WebSpeechController } from "../lib/audio/webspeech-recognizer";
   import { buildFeedback, summaryTh } from "../lib/feedback/templates";
   import { speak, speakSequence, cancelSpeech, hasThaiVoice, waitForVoices } from "../lib/tts/speech";
   import { saveAttempt } from "../lib/storage/db";
@@ -30,6 +31,8 @@
   let micLevel = $state(0);
   let levelRaf = 0;
   let modelDl = $state(0);
+  let wsController: WebSpeechController | null = null;
+  let wsTranscript: string | null = null;
 
   // Result data
   let score: number | null = $state(null);
@@ -91,6 +94,20 @@
     try {
       if (!recorder) recorder = await createMicRecorder();
       await recorder.start();
+      // Start Web Speech recognition in parallel (browser's built-in engine)
+      const rec = await getRecognizer();
+      wsController = rec.startWebSpeech?.(exercise.prompt) ?? null;
+      wsTranscript = null;
+      // Set up the result handler
+      if (wsController) {
+        wsController.result.then((r) => {
+          wsTranscript = r.transcript;
+          console.log("[Siang Dee] Web Speech heard:", r.transcript, "| confidence:", r.confidence, "| target:", exercise.prompt);
+        }).catch((e) => {
+          console.log("[Siang Dee] Web Speech failed:", e.message);
+          wsTranscript = null;
+        });
+      }
       // Keep screen awake while recording (SPEC §2)
       const s = $settings;
       if (s?.wakeLock !== false) await acquireWakeLock();
@@ -107,6 +124,15 @@
     cancelAnimationFrame(levelRaf);
     micLevel = 0;
     recState = "analyzing";
+    // Stop Web Speech recognition and wait for its result
+    if (wsController) {
+      wsController.stop();
+      // Wait up to 2s for the Web Speech result to arrive
+      await Promise.race([
+        wsController.result.then(() => {}).catch(() => {}),
+        new Promise((r) => setTimeout(r, 2000)),
+      ]);
+    }
     // Release wake lock now that recording is done
     await releaseWakeLock();
     const pcmData = await recorder.stop();
@@ -119,11 +145,11 @@
     try {
       const rec = await getRecognizer();
       const iv = setInterval(() => { modelDl = rec.loadProgress(); }, 200);
-      const words = await rec.recognizeWords(pcmData);
+      const words = await rec.recognizeWords(pcmData, wsTranscript ?? undefined);
       clearInterval(iv);
       spokenWords = words.map((w) => w.word).join(" ");
-      console.log("[Siang Dee] Whisper heard:", spokenWords, "| target:", exercise.prompt);
-      const recognized: RecognizedPhoneme[] = await rec.recognize(pcmData, exercise.prompt);
+      console.log("[Siang Dee] Final transcript:", spokenWords, "| Web Speech:", wsTranscript, "| target:", exercise.prompt);
+      const recognized: RecognizedPhoneme[] = await rec.recognize(pcmData, exercise.prompt, wsTranscript ?? undefined);
       console.log("[Siang Dee] Recognized phonemes:", recognized.map((r) => r.token).join(" "), "| target phonemes:", exercise.targetPhonemes.join(" "));
       const spoken = recognized.map((r) => r.token);
       const confs = recognized.map((r) => r.confidence);
@@ -214,6 +240,7 @@
     cancelSpeech();
     recState = "idle";
     score = null; displayScore = 0; errors = []; phonemeScores = []; spokenWords = "";
+    wsController = null; wsTranscript = null;
     // keep hasResult true — prior chips stay visible for comparison
   }
   function nextEx() {
@@ -229,6 +256,7 @@
     currentExerciseId.set(exercise.id);
     recState = "idle"; score = null; displayScore = 0; errors = []; phonemeScores = [];
     spokenWords = ""; hasResult = false; canPlayYours = false;
+    wsController = null; wsTranscript = null;
   }
 
   // Score verdict helpers
