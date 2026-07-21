@@ -37,6 +37,8 @@ export interface Settings {
   speakRate: 0.8 | 1.0 | 1.1;
   muted: boolean;
   onboarded: boolean;
+  reminderTime: string; // "HH:MM" for daily practice reminder, "" = off
+  reminderGranted: boolean; // notification permission granted
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -48,6 +50,8 @@ const DEFAULT_SETTINGS: Settings = {
   speakRate: 1.0,
   muted: false,
   onboarded: false,
+  reminderTime: "",
+  reminderGranted: false,
 };
 
 interface SDDB extends DBSchema {
@@ -56,6 +60,7 @@ interface SDDB extends DBSchema {
   progress: { key: string; value: Progress };
   settings: { key: string; value: Settings };
   audio: { key: string; value: { id: string; blob: Blob; createdAt: number } };
+  meta: { key: string; value: { key: string; value: any } };
 }
 
 let dbp: Promise<IDBPDatabase<SDDB>> | null = null;
@@ -72,6 +77,7 @@ function db() {
         if (!db.objectStoreNames.contains("progress")) db.createObjectStore("progress", { keyPath: "errorId" });
         if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings");
         if (!db.objectStoreNames.contains("audio")) db.createObjectStore("audio", { keyPath: "id" });
+        if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta", { keyPath: "key" });
       },
     });
   }

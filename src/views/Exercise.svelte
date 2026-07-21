@@ -15,7 +15,7 @@
 import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   import { buildFeedback, summaryTh } from "../lib/feedback/templates";
   import { speak, speakSequence, cancelSpeech, hasThaiVoice, waitForVoices } from "../lib/tts/speech";
-  import { saveAttempt } from "../lib/storage/db";
+  import { saveAttempt, getRecentAttempts, getAudio, type Attempt } from "../lib/storage/db";
   import { pickNextAdaptive } from "../lib/goals/adaptive";
   import { t, type Lang } from "../lib/i18n";
   import { ERROR_CATEGORIES, type ErrorId } from "../lib/phonology";
@@ -53,6 +53,11 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   let modelDlProgress = $state(0);
   let modelDlPhase: "downloading" | "ready" = $state("downloading");
   let echoMode = $state(false);
+  let attemptCount = $state(0);       // attempts on current exercise this session
+  let bestScoreThisExercise = $state(0); // best score on current exercise
+  let hasPassed70 = $state(false);     // whether the user has hit 70+ on this word
+  let prevAttemptAudio = $state<Blob | null>(null);  // audio from a prior attempt
+  let prevAttemptScore = $state<number | null>(null);
 
   $effect(() => { const s = $settings; if (s) lang = s.uiLang; });
 
@@ -174,15 +179,33 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
       errors = result.errors;
       phonemeScores = result.perPhonemeScore;
 
-      await saveAttempt({
-        id: `att-${Date.now()}`,
-        exerciseId: exercise.id,
-        timestamp: Date.now(),
-        targetPhonemes: target,
-        spokenPhonemes: spoken,
-        errors: errors.map((e) => ({ errorId: e.errorId, position: e.position })),
-        score: result.wordScore,
-      });
+      // Track retry loop state
+      attemptCount++;
+      bestScoreThisExercise = Math.max(bestScoreThisExercise, result.wordScore);
+      if (result.wordScore >= 70) hasPassed70 = true;
+
+      // Load previous attempt audio for the "hear earlier" button
+      try {
+        const recent = await getRecentAttempts(50);
+        const prev = recent.find((a) => a.exerciseId === exercise.id && a.id !== `att-${Date.now()}` && a.audioRef);
+        if (prev?.audioRef) {
+          const blob = await getAudio(prev.audioRef);
+          if (blob) { prevAttemptAudio = blob; prevAttemptScore = prev.score; }
+        } else { prevAttemptAudio = null; prevAttemptScore = null; }
+      } catch { /* audio history is a nice-to-have */ }
+
+      await saveAttempt(
+        {
+          id: `att-${Date.now()}`,
+          exerciseId: exercise.id,
+          timestamp: Date.now(),
+          targetPhonemes: target,
+          spokenPhonemes: spoken,
+          errors: errors.map((e) => ({ errorId: e.errorId, position: e.position })),
+          score: result.wordScore,
+        },
+        pcmToWav(pcmData), // save audio blob for history playback
+      );
 
       recState = "result";
       hasResult = true;
@@ -260,6 +283,7 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
     score = null; displayScore = 0; errors = []; phonemeScores = []; spokenWords = "";
     wsController = null; wsTranscript = null;
     // keep hasResult true — prior chips stay visible for comparison
+    // keep attemptCount + bestScoreThisExercise — they track progress on this word
   }
   function nextEx() {
     cancelSpeech();
@@ -275,6 +299,8 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
     recState = "idle"; score = null; displayScore = 0; errors = []; phonemeScores = [];
     spokenWords = ""; hasResult = false; canPlayYours = false;
     wsController = null; wsTranscript = null;
+    attemptCount = 0; bestScoreThisExercise = 0; hasPassed70 = false;
+    prevAttemptAudio = null; prevAttemptScore = null;
   }
 
   // Score verdict helpers
@@ -313,6 +339,12 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
     await startRecord();
   }
 
+  function playPrev() {
+    if (!prevAttemptAudio) return;
+    const url = URL.createObjectURL(prevAttemptAudio);
+    playAudioUrlWithFadeOut(url).catch(() => {}).finally(() => setTimeout(() => URL.revokeObjectURL(url), 2000));
+  }
+
   function toggleEcho() { echoMode = !echoMode; }
 
   const catLabel = $derived(exercise.errorIds.map((eid: string) => `${eid} ${ERROR_CATEGORIES[eid as ErrorId]?.nameTh ?? ""}`).join(" · "));
@@ -321,6 +353,38 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   const wordBoundaries: number[] | null = $derived(exercise.type === "sentence"
     ? sentenceToPhonemes(exercise.prompt).boundaries
     : null);
+
+  // Per-word average score for sentence mode (highlight word groups)
+  function wordScoreAvg(wi: number): number {
+    if (!wordBoundaries || phonemeScores.length === 0) return -1;
+    const start = wi === 0 ? 0 : wordBoundaries[wi - 1] + 1;
+    const end = (wordBoundaries[wi] ?? phonemeScores.length - 1) + 1;
+    const slice = phonemeScores.slice(start, end).filter((s) => s >= 0);
+    if (slice.length === 0) return -1;
+    return Math.round(slice.reduce((a, b) => a + b, 0) / slice.length);
+  }
+  function wordGroupColor(wi: number): string {
+    const avg = wordScoreAvg(wi);
+    if (avg < 0) return "transparent";
+    if (avg >= 80) return "color-mix(in srgb, var(--c-success) 12%, transparent)";
+    if (avg >= 50) return "color-mix(in srgb, var(--c-warn) 12%, transparent)";
+    return "color-mix(in srgb, var(--c-danger) 12%, transparent)";
+  }
+  // For sentence mode: find the worst word index (lowest avg score)
+  const worstWordIdx = $derived(wordBoundaries && phonemeScores.length > 0
+    ? exercise.prompt.split(/\s+/).reduce((best: number, _w, wi) => {
+        const avg = wordScoreAvg(wi);
+        return avg >= 0 && (best === -1 || avg < wordScoreAvg(best)) ? wi : best;
+      }, -1)
+    : -1);
+  // For sentence mode: filter errors to only show coaching for the worst word
+  const sentenceErrors = $derived(wordBoundaries && worstWordIdx >= 0 && errors.length > 0
+    ? errors.filter((e) => {
+        const start = worstWordIdx === 0 ? 0 : wordBoundaries[worstWordIdx - 1] + 1;
+        const end = (wordBoundaries[worstWordIdx] ?? phonemeScores.length - 1) + 1;
+        return e.position >= start && e.position < end;
+      })
+    : errors);
 </script>
 
 <section class="exercise">
@@ -355,6 +419,12 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
         <span class="t-caption">0.6×</span>
       </button>
     {/if}
+    {#if prevAttemptAudio}
+      <button class="audio-btn prev" onclick={playPrev}>
+        <IconRotateCcw size={18} stroke-width={2} />
+        <span class="t-caption">ฟังครั้งก่อน{#if prevAttemptScore !== null} · {prevAttemptScore}{/if}</span>
+      </button>
+    {/if}
     <!-- Echo mode toggle -->
     <button class="audio-btn echo" class:active={echoMode} onclick={toggleEcho} aria-pressed={echoMode}>
       <IconVolume2 size={18} stroke-width={2} />
@@ -365,11 +435,11 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   <!-- Phoneme chips (after first analysis) -->
   {#if hasResult && phonemeScores.length > 0}
     {#if wordBoundaries}
-      <!-- Sentence mode: group chips by word -->
+      <!-- Sentence mode: group chips by word, highlight by per-word score -->
       <div class="chips-sentence">
         {#each exercise.prompt.split(/\s+/) as w, wi}
-          <div class="word-group">
-            <span class="word-label t-micro fg-muted">{w}</span>
+          <div class="word-group" style="background: {wordGroupColor(wi)}; border-radius: var(--r-sm); padding: var(--s-2) var(--s-3);">
+            <span class="word-label t-micro fg-muted" class:worst={wi === worstWordIdx}>{w}</span>
             <div class="word-chips">
               {#each exercise.targetPhonemes.slice(wi === 0 ? 0 : (wordBoundaries[wi - 1] + 1), (wordBoundaries[wi] ?? exercise.targetPhonemes.length - 1) + 1) as p, j}
                 <div class="chip" style="animation-delay: {900 + j * 40}ms">
@@ -401,17 +471,23 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
 
   <!-- Coaching text or success -->
   {#if recState === "result" && errors.length > 0}
-    <div class="coaching">
-      <!-- Mouth position diagram for the first error -->
-      <MouthDiagram errorId={errors[0].errorId} />
-      {#each errors as e}
-        {@const fb = buildFeedback(e.errorId, e.target, e.spoken)}
-        <div class="err-block">
-          <span class="err-tag">{e.errorId}</span>
-          <p class="t-body-lg" lang="th">{fb.th}</p>
-        </div>
-      {/each}
-    </div>
+    {@const displayErrors = wordBoundaries ? sentenceErrors : errors}
+    {#if displayErrors.length > 0}
+      <div class="coaching">
+        <!-- Mouth position diagram for the first error -->
+        <MouthDiagram errorId={displayErrors[0].errorId} />
+        {#if wordBoundaries && worstWordIdx >= 0}
+          <span class="t-micro fg-muted" lang="th">คำที่ต้องแก้: {exercise.prompt.split(/\s+/)[worstWordIdx]}</span>
+        {/if}
+        {#each displayErrors as e}
+          {@const fb = buildFeedback(e.errorId, e.target, e.spoken)}
+          <div class="err-block">
+            <span class="err-tag">{e.errorId}</span>
+            <p class="t-body-lg" lang="th">{fb.th}</p>
+          </div>
+        {/each}
+      </div>
+    {/if}
   {:else if recState === "result" && errors.length === 0}
     <div class="success-msg">
       <IconCheck size={18} stroke-width={2} />
@@ -545,12 +621,20 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
 
   <!-- Actions (result recState) -->
   {#if recState === "result"}
+    <!-- Attempt counter: show progress on this word -->
+    {#if attemptCount > 1}
+      <div class="attempt-counter">
+        <span class="t-micro fg-muted" lang="th">ครั้งที่ {attemptCount} · ดีที่สุด {bestScoreThisExercise}</span>
+      </div>
+    {/if}
     <div class="actions">
-      <button class="act-btn" onclick={retry}>
+      <!-- Score-gated progression: "try again" is primary when score<70,
+           "next" is primary when score≥70. Encourage the retry loop. -->
+      <button class="act-btn" class:primary={!hasPassed70} onclick={retry}>
         <IconRotateCcw size={18} stroke-width={2} />
         <span>{t(lang, "tryAgain")}</span>
       </button>
-      <button class="act-btn primary" onclick={nextEx}>
+      <button class="act-btn" class:primary={hasPassed70} onclick={nextEx}>
         <span>{t(lang, "next")}</span>
         <IconChevronRight size={18} stroke-width={2} />
       </button>
@@ -614,6 +698,7 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   .chips-sentence { display: flex; flex-wrap: wrap; gap: var(--s-4); justify-content: center; }
   .word-group { display: flex; flex-direction: column; gap: var(--s-2); align-items: center; }
   .word-label { line-height: 1; }
+  .word-label.worst { color: var(--c-danger); font-weight: 600; }
   .word-chips { display: flex; gap: var(--s-2); }
   .chip {
     display: flex; flex-direction: column; align-items: center; gap: var(--s-2);
@@ -705,6 +790,7 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
 
   /* Actions */
   .actions { display: flex; gap: var(--s-3); width: 100%; }
+  .attempt-counter { text-align: center; }
   .act-btn {
     flex: 1;
     display: flex; align-items: center; justify-content: center; gap: var(--s-2);

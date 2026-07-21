@@ -1,6 +1,6 @@
 // Siang Dee service worker — offline app shell (SPEC §9).
 // Cache-first for static assets; network-first for nothing (no dynamic backend in MVP).
-const CACHE = "siang-dee-v3";
+const CACHE = "siang-dee-v4";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -41,6 +41,23 @@ self.addEventListener("fetch", (e) => {
         }
         return res;
       }).catch(() => cached ?? new Response("Offline", { status: 503 }));
+    }),
+  );
+});
+
+// Notification click: open the app and navigate to the exercise
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = e.notification.data?.url ?? "/";
+  e.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin)) {
+          client.navigate(url);
+          return client.focus();
+        }
+      }
+      return clients.openWindow(url);
     }),
   );
 });

@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { route, settings, loadSettings } from "./stores/app";
   import { initSpeech } from "./lib/tts/speech";
+  import { checkReminderOnOpen, scheduleReminder } from "./lib/goals/reminder";
   import Home from "./views/Home.svelte";
   import Exercise from "./views/Exercise.svelte";
   import MinimalPair from "./views/MinimalPair.svelte";
@@ -20,6 +21,10 @@
     const s = await loadSettings();
     lang = s.uiLang;
     loaded = true;
+    // Check if we should fire a catch-up reminder notification
+    checkReminderOnOpen();
+    // Schedule today's reminder if enabled
+    scheduleReminder();
   });
 
   // Reactive: when settings.onboarded flips to true, onboarding disappears automatically

@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { route, settings, updateSettings } from "../stores/app";
   import { speak, hasThaiVoice, voicesResolved, waitForVoices } from "../lib/tts/speech";
+  import { requestNotificationPermission, scheduleReminder } from "../lib/goals/reminder";
   import { t, type Lang } from "../lib/i18n";
 
   let lang: Lang = $state("th");
@@ -52,6 +53,23 @@
     if (!s || s.muted) return;
     speak("สวัสดีครับ นี่คือเสียงพูดจากแอป", { lang: "th", rate: s.speakRate });
     setTimeout(() => speak("Hello, this is the English voice.", { lang: "en", rate: s.speakRate }), 1400);
+  }
+
+  // Reminder notification handlers
+  async function enableReminder() {
+    const granted = await requestNotificationPermission();
+    if (granted) {
+      await updateSettings({ reminderTime: "20:00", reminderGranted: true });
+      scheduleReminder();
+    }
+  }
+  async function disableReminder() {
+    await updateSettings({ reminderTime: "", reminderGranted: false });
+  }
+  async function changeReminderTime(ev: Event) {
+    const value = (ev.target as HTMLInputElement).value;
+    await updateSettings({ reminderTime: value });
+    scheduleReminder();
   }
 </script>
 
@@ -115,6 +133,26 @@
         <button onclick={() => {}}>Light</button>
       </div>
     </div>
+  </div>
+
+  <hr class="rule" />
+
+  <!-- แจ้งเตือน (Reminders) -->
+  <div class="section">
+    <span class="t-micro fg-muted" lang="th">แจ้งเตือน</span>
+    <div class="row">
+      <span class="row-label t-body" lang="th">แจ้งเตือนฝึกทุกวัน</span>
+      <button class="toggle" class:on={!!s.reminderTime} onclick={() => s.reminderTime ? disableReminder() : enableReminder()}>
+        <span class="toggle-knob"></span>
+      </button>
+    </div>
+    {#if s.reminderTime}
+      <div class="row">
+        <span class="row-label t-body" lang="th">เวลาแจ้งเตือน</span>
+        <input type="time" value={s.reminderTime} onchange={changeReminderTime} class="time-input" />
+      </div>
+      <p class="hint t-micro fg-muted" lang="th">แจ้งเตือนเมื่อถึงเวลาและยังไม่ได้ฝึกวันนี้ — แตะเพื่อเปิดแอปฝึก 1 คำ</p>
+    {/if}
   </div>
 
   <hr class="rule" />
@@ -205,6 +243,12 @@
     font-weight: 500; min-height: 44px; text-align: left;
   }
   .warn { color: var(--c-warn); line-height: 1.4; }
+  .hint { line-height: 1.4; }
+  .time-input {
+    background: var(--c-surface); border: 1px solid var(--c-rule);
+    border-radius: var(--r-0); padding: var(--s-2) var(--s-3);
+    color: var(--c-fg); font-size: 14px; min-height: 32px;
+  }
   .privacy { line-height: 1.5; margin: 0; }
   .version { margin: 0; }
 

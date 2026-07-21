@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { route, settings, currentExerciseId } from "../stores/app";
-  import { getAllProgress, getRecentAttempts, clearAll, type Progress, type Attempt } from "../lib/storage/db";
+  import { getAllProgress, getRecentAttempts, getAudio, clearAll, type Progress, type Attempt } from "../lib/storage/db";
   import { EXERCISES } from "../data/exercises";
   import { ERROR_CATEGORIES, type ErrorId } from "../lib/phonology";
   import { t, type Lang } from "../lib/i18n";
@@ -10,7 +10,7 @@
   let lang: Lang = $state("th");
   let progress: Progress[] = $state([]);
   let attempts: Attempt[] = $state([]);
-  let worstWords: Array<{ exerciseId: string; avgScore: number; attempts: number; prompt: string }> = $state([]);
+  let worstWords: Array<{ exerciseId: string; avgScore: number; attempts: number; prompt: string; firstAttempt?: Attempt; latestAttempt?: Attempt }> = $state([]);
 
   $effect(() => { const s = $settings; if (s) lang = s.uiLang; });
   onMount(async () => {
@@ -26,12 +26,19 @@
       else { byExercise.set(a.exerciseId, { scores: [a.score], prompt }); }
     }
     worstWords = Array.from(byExercise.entries())
-      .map(([eid, v]) => ({
-        exerciseId: eid,
-        avgScore: Math.round(v.scores.reduce((s, x) => s + x, 0) / v.scores.length),
-        attempts: v.scores.length,
-        prompt: v.prompt,
-      }))
+      .map(([eid, v]) => {
+        const exerciseAttempts = attempts
+          .filter((a) => a.exerciseId === eid)
+          .sort((a, b) => a.timestamp - b.timestamp);
+        return {
+          exerciseId: eid,
+          avgScore: Math.round(v.scores.reduce((s, x) => s + x, 0) / v.scores.length),
+          attempts: v.scores.length,
+          prompt: v.prompt,
+          firstAttempt: exerciseAttempts[0],
+          latestAttempt: exerciseAttempts[exerciseAttempts.length - 1],
+        };
+      })
       .filter((w) => w.attempts >= 2)
       .sort((a, b) => a.avgScore - b.avgScore)
       .slice(0, 5);
@@ -71,6 +78,32 @@
     return "var(--c-rule)";
   }
   async function clear() { await clearAll(); progress = []; attempts = []; }
+
+  // Before/after audio player: plays first attempt, then latest, so the user
+  // can hear their improvement on their worst words.
+  let beforeAfterMsg = $state<string | null>(null);
+  async function playBeforeAfter(first: Attempt, latest: Attempt) {
+    beforeAfterMsg = "กำลังเล่นครั้งแรก...";
+    try {
+      const firstBlob = first.audioRef ? await getAudio(first.audioRef) : null;
+      const latestBlob = latest.audioRef ? await getAudio(latest.audioRef) : null;
+      if (firstBlob) {
+        const url = URL.createObjectURL(firstBlob);
+        const audio = new Audio(url);
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          beforeAfterMsg = "กำลังเล่นครั้งล่าสุด...";
+          if (latestBlob) {
+            const url2 = URL.createObjectURL(latestBlob);
+            const audio2 = new Audio(url2);
+            audio2.onended = () => { URL.revokeObjectURL(url2); beforeAfterMsg = null; };
+            audio2.play().catch(() => { beforeAfterMsg = null; });
+          } else { beforeAfterMsg = null; }
+        };
+        audio.play().catch(() => { beforeAfterMsg = null; });
+      }
+    } catch { beforeAfterMsg = null; }
+  }
   const d = $derived(delta());
   const allErrorIds = Object.keys(ERROR_CATEGORIES) as ErrorId[];
 </script>
@@ -143,17 +176,23 @@
       <span class="t-micro fg-muted" lang="th">{t(lang, "worstWords")}</span>
       <div class="worst-list">
         {#each worstWords as w}
-          <button class="worst-row rule-b" onclick={() => { currentExerciseId.set(w.exerciseId); route.set("exercise"); }}>
+        <div class="worst-row rule-b" onclick={() => { currentExerciseId.set(w.exerciseId); route.set("exercise"); }} role="button" tabindex="0">
             <span class="worst-word t-body-lg">{w.prompt}</span>
             <span class="worst-score t-display-l t-num" style="color: {w.avgScore >= 80 ? 'var(--c-success)' : w.avgScore >= 50 ? 'var(--c-warn)' : 'var(--c-danger)'}">{w.avgScore}</span>
             <span class="worst-meta t-micro fg-muted" lang="th">{w.attempts} ครั้ง</span>
+            {#if w.firstAttempt?.audioRef && w.latestAttempt?.audioRef && w.firstAttempt.id !== w.latestAttempt.id}
+              <button class="worst-play" onclick={(e) => { e.stopPropagation(); playBeforeAfter(w.firstAttempt!, w.latestAttempt!); }} lang="th">เปรียบเทียบ</button>
+            {/if}
             <IconChevronRight size={16} stroke-width={2} class="worst-arrow" />
-          </button>
+          </div>
         {/each}
       </div>
     {/if}
 
     <button class="clear-btn" onclick={clear} lang="th">{t(lang, "clearData")}</button>
+  {/if}
+  {#if beforeAfterMsg}
+    <div class="before-after-toast t-caption" lang="th">{beforeAfterMsg}</div>
   {/if}
 </section>
 
@@ -216,4 +255,15 @@
   .worst-score { font-feature-settings: "tnum"; flex-shrink: 0; }
   .worst-meta { flex-shrink: 0; }
   .worst-arrow { color: var(--c-fg-muted); flex-shrink: 0; }
+  .worst-play {
+    background: var(--c-surface); border: 1px solid var(--c-accent); color: var(--c-accent);
+    border-radius: var(--r-sm); padding: var(--s-1) var(--s-3); font-size: 11px;
+    flex-shrink: 0; min-height: 28px; white-space: nowrap;
+  }
+  .before-after-toast {
+    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+    background: var(--c-surface); border: 1px solid var(--c-rule);
+    border-radius: var(--r-0); padding: var(--s-3) var(--s-5);
+    z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  }
 </style>
