@@ -423,10 +423,14 @@
       <div class="score-bar-track">
         <div class="score-bar-fill" style="width: {score}%; background: {verdictColor(score)}"></div>
       </div>
-      {#if spokenWords}
+      {#if spokenWords && (score === null || score > 40)}
         <div class="heard">
           <span class="t-micro fg-muted" lang="th">ได้ยิน</span>
           <span class="t-caption">"{spokenWords}"</span>
+        </div>
+      {:else if score !== null && score <= 40}
+        <div class="heard">
+          <span class="t-micro fg-muted" lang="th">ไม่ได้ยินชัด ลองใหม่อีกครั้ง</span>
         </div>
       {/if}
     </div>

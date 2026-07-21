@@ -43,6 +43,8 @@ export async function createMicRecorder(): Promise<MicRecorder> {
     recording = true;
 
     // Try AudioWorklet first (modern path)
+    // Use a unique processor name per AudioContext to avoid "already registered" errors
+    const procName = `rec-proc-${Date.now()}`;
     try {
       const workletCode = `
         class RecProcessor extends AudioWorkletProcessor {
@@ -57,12 +59,13 @@ export async function createMicRecorder(): Promise<MicRecorder> {
             return true;
           }
         }
-        registerProcessor("rec-processor", RecProcessor);
+        registerProcessor("${procName}", RecProcessor);
       `;
       const blob = new Blob([workletCode], { type: "application/javascript" });
       const url = URL.createObjectURL(blob);
       await ctx.audioWorklet.addModule(url);
-      workletNode = new AudioWorkletNode(ctx, "rec-processor", {
+      URL.revokeObjectURL(url);
+      workletNode = new AudioWorkletNode(ctx, procName, {
         numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1,
       });
       workletNode.port.onmessage = (ev) => {

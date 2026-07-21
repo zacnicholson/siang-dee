@@ -88,11 +88,22 @@ export function detectErrors(
     }
   }
 
+  // Deduplicate: keep only one error per errorId+position, and collapse
+  // consecutive same-type errors into one (e.g. multiple E3 deletions → one)
+  const seen = new Set<string>();
+  const deduped: DetectedError[] = [];
+  for (const e of errors) {
+    const key = `${e.errorId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(e);
+  }
+
   const total = target.length || 1;
   const matches = aligned.matches;
   const wordScore = Math.round(Math.max(0, Math.min(100, (matches / total) * 100 - (errors.length * 4))));
 
-  return { errors, perPhonemeScore, wordScore, matches, total };
+  return { errors: deduped, perPhonemeScore, wordScore, matches, total };
 }
 
 export { ERROR_CATEGORIES };

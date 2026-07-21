@@ -7,6 +7,7 @@
  *  - iOS Safari requires a user gesture before first speech
  *  - no Thai voice installed → graceful degrade + hint
  *  - Voice selection: prefer natural/premium voices over robotic system defaults
+ *  - End-of-utterance audio pop: flush audio output with a silent buffer
  */
 
 export interface SpeakOptions {
@@ -19,13 +20,8 @@ let thVoice: SpeechSynthesisVoice | null = null;
 let enVoice: SpeechSynthesisVoice | null = null;
 let voicesReady = false;
 let voicesWaiters: Array<() => void> = [];
+let speakingNow = false;
 
-/**
- * Voice preference ranking — higher = better.
- * Google voices are the most natural on Android Chrome.
- * Apple "Samantha" / "Daniel" are decent on iOS/macOS.
- * Avoid "Microsoft ... Desktop" robotic voices.
- */
 function voiceScore(v: SpeechSynthesisVoice, lang: "th" | "en"): number {
   const name = v.name.toLowerCase();
   let score = 0;
@@ -124,11 +120,56 @@ export function getEnglishVoiceName(): string | null {
   return enVoice?.name ?? null;
 }
 
+/**
+ * Play a short silent audio buffer to flush the audio output.
+ * This prevents the "click/pop" that occurs when speechSynthesis stops
+ * abruptly at the end of an utterance — a known browser/platform issue.
+ * The silent buffer keeps the audio output open briefly so it fades
+ * naturally instead of cutting hard.
+ */
+let flushCtx: AudioContext | null = null;
+function flushAudioOutput() {
+  try {
+    if (!flushCtx || flushCtx.state === "closed") {
+      flushCtx = new AudioContext();
+    }
+    if (flushCtx.state === "suspended") flushCtx.resume();
+
+    // 200ms of silence with a tiny fade — just enough to flush the output buffer
+    const dur = 0.2;
+    const sr = flushCtx.sampleRate;
+    const buf = flushCtx.createBuffer(1, Math.ceil(sr * dur), sr);
+    const data = buf.getChannelData(0);
+    // Very quiet dithering noise at -60dB to keep the output path "alive"
+    // without being audible — this prevents the pop better than pure silence
+    for (let i = 0; i < data.length; i++) {
+      const fade = Math.max(0, 1 - (i / data.length) * 2); // fade out over first half
+      data[i] = (Math.random() * 2 - 1) * 0.0001 * fade;
+    }
+    const src = flushCtx.createBufferSource();
+    src.buffer = buf;
+    const gain = flushCtx.createGain();
+    gain.gain.value = 1;
+    src.connect(gain);
+    gain.connect(flushCtx.destination);
+    src.start();
+    src.onended = () => {
+      // Don't close the context — reuse it for next flush
+    };
+  } catch {
+    // AudioContext not available — degrade silently
+  }
+}
+
 export function speak(text: string, opts: SpeakOptions = {}) {
   if (typeof speechSynthesis === "undefined") return;
   try {
-    // Cancel any pending speech first to avoid queue buildup
-    speechSynthesis.cancel();
+    // Only cancel if something is actually speaking — avoid unnecessary
+    // cancel() calls that cause clicks when nothing is queued
+    if (speakingNow) {
+      speechSynthesis.cancel();
+      speakingNow = false;
+    }
 
     const u = new SpeechSynthesisUtterance(text);
     const v = opts.lang === "en" ? enVoice : thVoice;
@@ -144,7 +185,19 @@ export function speak(text: string, opts: SpeakOptions = {}) {
     u.pitch = 1.0;
     u.volume = 1.0;
 
-    if (opts.onEnd) u.onend = () => opts.onEnd!();
+    speakingNow = true;
+    u.onstart = () => { speakingNow = true; };
+    u.onend = () => {
+      speakingNow = false;
+      // Flush audio output to prevent the end-of-utterance click/pop
+      flushAudioOutput();
+      opts.onEnd?.();
+    };
+    u.onerror = () => {
+      speakingNow = false;
+      flushAudioOutput();
+      opts.onEnd?.();
+    };
     speechSynthesis.speak(u);
   } catch { /* ignore — text fallback */ }
 }
@@ -162,7 +215,10 @@ export async function speakSequence(items: Array<{ text: string; lang: "th" | "e
 }
 
 export function cancelSpeech() {
-  if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
+  if (typeof speechSynthesis !== "undefined") {
+    speechSynthesis.cancel();
+  }
+  speakingNow = false;
 }
 
 export function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }

@@ -143,14 +143,16 @@ function transcriptToPhonemes(
         return { phonemes: result, matchedWord: bestWord, confidence: 0.7 };
       }
     } else {
-      // Heard something but it doesn't match the target at all
-      // Use target phonemes with low confidence so scoring can flag errors
+      // Whisper hallucinated something totally unrelated (e.g. "you" for "light").
+      // Don't trust it — use target phonemes with low confidence so the scoring
+      // layer can still flag errors, but the user won't see "I hear you" when
+      // they said "light". Instead, treat it as a low-confidence match.
       const targetPhonemes = lookupIPA(targetWord.toLowerCase());
       if (targetPhonemes) {
         for (const p of targetPhonemes) {
-          result.push({ token: p, confidence: 0.5, start: 0, end: 1 });
+          result.push({ token: p, confidence: 0.4, start: 0, end: 1 });
         }
-        return { phonemes: result, matchedWord: words[0] ?? "", confidence: 0.5 };
+        return { phonemes: result, matchedWord: "", confidence: 0.4 };
       }
     }
   }
@@ -196,12 +198,10 @@ function makeApi(): Recognizer {
 
       // For short single-word recognition, limit output tokens to prevent
       // hallucinations (Whisper tends to hallucinate when given silence/short audio)
-      // The <|notimestamps|> token + max_new_tokens=10 limits output to ~1-3 words
       // @ts-ignore
       const out = await pipeline(audio, {
         return_timestamps: false,
-        chunk_length_s: 0,
-        max_new_tokens: 12,
+        max_new_tokens: 16,
         sampling_rate: 16000,
       });
       const text: string = (out?.text ?? "").trim();
