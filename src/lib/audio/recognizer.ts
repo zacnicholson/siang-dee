@@ -24,15 +24,23 @@ export interface RecognizedPhoneme {
   end: number;
 }
 
+export interface WordResult {
+  word: string;
+  confidence: number;
+  start: number;
+  end: number;
+}
+
 export interface Recognizer {
   isReady(): boolean;
   loadProgress(): number;
-  /** Recognize phonemes from a PCM recording + optional Web Speech transcript */
-  recognize(pcm: Float32Array, targetWord?: string, webSpeechTranscript?: string): Promise<RecognizedPhoneme[]>;
+  /** Recognize phonemes from a PCM recording + optional Web Speech transcript.
+   *  Pass `whisperWords` (from recognizeWords) to avoid running Whisper twice. */
+  recognize(pcm: Float32Array, targetWord?: string, webSpeechTranscript?: string, whisperWords?: WordResult[]): Promise<RecognizedPhoneme[]>;
   /** Start Web Speech recognition in parallel with PCM recording */
   startWebSpeech(targetWord?: string): WebSpeechController | null;
   /** raw word transcript (for debug / display) */
-  recognizeWords(pcm: Float32Array, webSpeechTranscript?: string): Promise<{ word: string; confidence: number; start: number; end: number }[]>;
+  recognizeWords(pcm: Float32Array, webSpeechTranscript?: string): Promise<WordResult[]>;
 }
 
 let pipeline: any = null;
@@ -161,17 +169,10 @@ function transcriptToPhonemes(
         return { phonemes: result, matchedWord: bestWord, confidence: 0.7 };
       }
     } else {
-      // Whisper hallucinated something totally unrelated (e.g. "you" for "light").
-      // Don't trust it — use target phonemes with low confidence so the scoring
-      // layer can still flag errors, but the user won't see "I hear you" when
-      // they said "light". Instead, treat it as a low-confidence match.
-      const targetPhonemes = lookupIPA(targetWord.toLowerCase());
-      if (targetPhonemes) {
-        for (const p of targetPhonemes) {
-          result.push({ token: p, confidence: 0.4, start: 0, end: 1 });
-        }
-        return { phonemes: result, matchedWord: "", confidence: 0.4 };
-      }
+      // Whisper hallucinated something totally unrelated (e.g. "you" for "cup").
+      // Return EMPTY phonemes — this signals recognition failure to the caller.
+      // The caller can then show "try again" instead of scoring 0/100.
+      return { phonemes: [], matchedWord: "", confidence: 0 };
     }
   }
 
@@ -204,15 +205,19 @@ function makeApi(): Recognizer {
       if (!pipeline) await ensureWhisperLoaded();
       if (!pipeline) throw new Error("Failed to load Whisper model");
 
-      // Whisper needs at least 1s of audio; pad short clips with silence
-      // BUT don't pad too much — excessive silence triggers hallucinations
-      const minLen = 16000; // 1 second minimum
-      let audio = pcm;
-      if (audio.length < minLen) {
-        const padded = new Float32Array(minLen);
-        padded.set(audio);
-        audio = padded;
+      // Guard against silence/ultra-short clips BEFORE running Whisper.
+      // Whisper-tiny reliably hallucinates common tokens ("you", "the", "a")
+      // from near-zero-energy audio. Padding with silence made this worse.
+      // Return empty words → caller shows "try again" instead of a false 0/100.
+      let energy = 0;
+      for (let i = 0; i < pcm.length; i++) energy += pcm[i] * pcm[i];
+      const rms = Math.sqrt(energy / Math.max(1, pcm.length));
+      if (pcm.length < 8000 || rms < 0.01) {
+        // <0.5s of audio or effectively silent — nothing to transcribe.
+        return [];
       }
+
+      let audio = pcm;
 
       // For short single-word recognition, limit output tokens to prevent
       // hallucinations (Whisper tends to hallucinate when given silence/short audio)
@@ -226,7 +231,7 @@ function makeApi(): Recognizer {
       });
       const text: string = (out?.text ?? "").trim();
 
-      const words: { word: string; confidence: number; start: number; end: number }[] = [];
+      const words: WordResult[] = [];
       let t = 0;
       for (const w of text.split(/\s+/).filter(Boolean)) {
         words.push({ word: w.replace(/[.,!?;:]/g, ""), confidence: 0.85, start: t, end: t + 0.3 });
@@ -235,16 +240,22 @@ function makeApi(): Recognizer {
       return words;
     },
 
-    recognize: async (pcm: Float32Array, targetWord?: string, webSpeechTranscript?: string) => {
+    recognize: async (pcm: Float32Array, targetWord?: string, webSpeechTranscript?: string, whisperWords?: WordResult[]) => {
       // Use Web Speech transcript if available (cross-check)
       if (webSpeechTranscript) {
         const { phonemes } = transcriptToPhonemes(webSpeechTranscript, targetWord);
         if (phonemes.length > 0) return phonemes;
       }
 
-      // PRIMARY: Whisper path
-      const words = await makeApi().recognizeWords(pcm, undefined); // don't pass wsTranscript, we already tried it
-      const transcriptText = words.map((w) => w.word).join(" ");
+      // Whisper path. Reuse the word list the caller already computed
+      // (recognizeWords) when available so we don't run the model twice.
+      let transcriptText: string;
+      if (whisperWords && whisperWords.length > 0) {
+        transcriptText = whisperWords.map((w) => w.word).join(" ");
+      } else {
+        const words = await makeApi().recognizeWords(pcm, undefined);
+        transcriptText = words.map((w) => w.word).join(" ");
+      }
       const { phonemes } = transcriptToPhonemes(transcriptText, targetWord);
       return phonemes;
     },

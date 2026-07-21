@@ -95,14 +95,16 @@
     try {
       if (!recorder) recorder = await createMicRecorder();
       await recorder.start();
-      // Start Web Speech in parallel
+      // Start Web Speech in parallel (use the word for this index, not the
+      // `word` that's only defined later in stopRecording)
       const rec = await getRecognizer();
-      wsController = rec.startWebSpeech?.(word) ?? null;
+      const wsTarget = idx === 0 ? firstWord : secondWord;
+      wsController = rec.startWebSpeech?.(wsTarget) ?? null;
       wsTranscript = null;
       if (wsController) {
         wsController.result.then((r) => {
           wsTranscript = r.transcript;
-          console.log("[Siang Dee] Web Speech heard:", r.transcript, "| target:", word);
+          console.log("[Siang Dee] Web Speech heard:", r.transcript, "| target:", wsTarget);
         }).catch((e) => {
           console.log("[Siang Dee] Web Speech failed:", e.message);
           wsTranscript = null;

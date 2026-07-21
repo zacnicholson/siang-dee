@@ -44,6 +44,8 @@ export function startWebSpeechRecognition(
   let resolveFn: ((r: WebSpeechResult) => void) | null = null;
   let rejectFn: ((e: any) => void) | null = null;
 
+  let retried = false; // guard against retry loops on repeated network errors
+
   const result = new Promise<WebSpeechResult>((resolve, reject) => {
     resolveFn = resolve;
     rejectFn = reject;
@@ -53,16 +55,17 @@ export function startWebSpeechRecognition(
       return;
     }
 
-    try {
-      recognition = new SR();
-      recognition.lang = "en-US";
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 5;
-    } catch (e: any) {
-      reject(new Error(`SpeechRecognition init failed: ${e.message}`));
-      return;
-    }
+    // Build + wire a fresh SpeechRecognition instance. Extracted so we can
+    // restart it on a transient `network` error (Chrome's online engine)
+    // instead of letting onend reject before the user has spoken.
+    const buildRecognition = (): any => {
+      const r = new SR();
+      r.lang = "en-US";
+      r.continuous = false;
+      r.interimResults = false;
+      r.maxAlternatives = 5;
+      return r;
+    };
 
     const done = (r: WebSpeechResult) => {
       if (settled) return;
@@ -84,7 +87,15 @@ export function startWebSpeechRecognition(
       fail(new Error("recognition timeout"));
     }, timeoutMs);
 
-    recognition.onresult = (event: any) => {
+    let networkFailed = false;
+
+    const wire = (r: any) => {
+      r.onresult = onResult;
+      r.onerror = onError;
+      r.onend = onEnd;
+    };
+
+    const onResult = (event: any) => {
       const results = event.results;
       const alternatives: Array<{ transcript: string; confidence: number }> = [];
       for (let i = 0; i < results.length; i++) {
@@ -122,29 +133,53 @@ export function startWebSpeechRecognition(
       }
     };
 
-    recognition.onerror = (event: any) => {
-      // "network" errors are transient on Chrome (Google's online engine).
-      // "aborted" happens when we stop() it ourselves. Don't treat these as fatal.
+    const onError = (event: any) => {
       if (event.error === "no-speech" || event.error === "aborted") {
         fail(new Error(`no speech detected: ${event.error}`));
       } else if (event.error === "not-allowed") {
         fail(new Error("microphone permission denied"));
       } else if (event.error === "network") {
-        // Transient — let onend handle it. Don't reject yet; the caller
-        // will fall back to Whisper if we never get a result.
-        console.warn("[Siang Dee] Web Speech network error — will fall back to Whisper if no result");
+        // Transient on Chrome's online engine. Retry once before giving up —
+        // a single re-start frequently succeeds and lets the user actually
+        // be heard instead of falling straight to the hallucination-prone
+        // Whisper path.
+        if (!retried) {
+          retried = true;
+          console.warn("[Siang Dee] Web Speech network error — retrying once");
+          try { recognition?.stop(); } catch {}
+          try {
+            recognition = buildRecognition();
+            wire(recognition);
+            recognition.start();
+          } catch (e: any) {
+            if (!String(e?.name || e?.message || "").includes("InvalidState")) {
+              networkFailed = true;
+            }
+          }
+        } else {
+          networkFailed = true;
+          console.warn("[Siang Dee] Web Speech network error (retry exhausted) — will fall back to Whisper");
+        }
       } else {
         fail(new Error(`recognition error: ${event.error}`));
       }
     };
 
-    recognition.onend = () => {
-      if (!settled) {
-        fail(new Error("recognition ended without result"));
+    const onEnd = () => {
+      if (settled) return;
+      // If a network retry is in flight (we restarted and haven't settled),
+      // this onend belongs to the failed first attempt — ignore it. The retry's
+      // own onresult/onend will settle the promise.
+      if (retried && !networkFailed) return;
+      if (networkFailed) {
+        console.warn("[Siang Dee] Web Speech ended after network error — falling back");
       }
+      fail(new Error("recognition ended without result"));
     };
 
     try {
+      recognition = buildRecognition();
+      wire(recognition);
       recognition.start();
     } catch (e: any) {
       // "InvalidStateError" if already started — ignore
@@ -158,13 +193,15 @@ export function startWebSpeechRecognition(
     if (settled) return;
     if (timer) clearTimeout(timer);
     try { recognition?.stop(); } catch {}
-    // Give it a moment to fire onresult before rejecting
+    // Give the engine up to 1.5s to deliver a late onresult after the user
+    // releases the button — a single short word often finalizes just as the
+    // finger lifts, and 500ms was too tight, cutting off valid results.
     setTimeout(() => {
       if (!settled && rejectFn) {
         settled = true;
         rejectFn(new Error("recognition stopped by user"));
       }
-    }, 500);
+    }, 1500);
   };
 
   return { result, stop };

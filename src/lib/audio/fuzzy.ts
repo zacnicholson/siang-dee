@@ -65,7 +65,8 @@ export function findBestWordMatch(
     }
   }
 
-  // If the best match is close enough, return it
-  if (best && bestDist <= 3) return best;
+  // If the best match is close enough, return it.
+  // Threshold: distance ≤ 2 (allows "like"→"light" but NOT "you"→"cup" which is 3)
+  if (best && bestDist <= 2) return best;
   return null;
 }

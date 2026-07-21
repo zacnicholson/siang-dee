@@ -145,6 +145,17 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
     // Release wake lock now that recording is done
     await releaseWakeLock();
     const pcmData = await recorder.stop();
+    // Minimum-recording guard: a sub-second tap (or a finger that slipped off
+    // via pointerleave) gives Web Speech little time to fire and leaves Whisper
+    // with effectively nothing. If the clip is too short AND Web Speech didn't
+    // deliver a transcript, don't hallucinate — ask the user to try again.
+    const recDurationSec = pcmData.length / 16000;
+    if (recDurationSec < 1.2 && !wsTranscript) {
+      console.warn("[Siang Dee] Recording too short:", recDurationSec.toFixed(2) + "s, no Web Speech transcript — skipping recognition");
+      errorMsg = t(lang, "unclear");
+      recState = "idle";
+      return;
+    }
     // Compute waveform bars for visual comparison
     userWaveBars = pcmToBars(pcmData, 16000, 64).bars;
     refWaveBars = syntheticReferenceBars(exercise.targetPhonemes.length, 64);
@@ -170,19 +181,29 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
       showModelDl = false;
       spokenWords = words.map((w) => w.word).join(" ");
       console.log("[Siang Dee] Final transcript:", spokenWords, "| Web Speech:", wsTranscript, "| target:", exercise.prompt);
-      const recognized: RecognizedPhoneme[] = await rec.recognize(pcmData, exercise.prompt, wsTranscript ?? undefined);
+      // Pass the already-computed words so recognize() doesn't run Whisper twice.
+      const recognized: RecognizedPhoneme[] = await rec.recognize(pcmData, exercise.prompt, wsTranscript ?? undefined, words);
       console.log("[Siang Dee] Recognized phonemes:", recognized.map((r) => r.token).join(" "), "| target phonemes:", exercise.targetPhonemes.join(" "));
       const spoken = recognized.map((r) => r.token);
       const confs = recognized.map((r) => r.confidence);
       const target = exercise.targetPhonemes as Phoneme[];
+
+      // Recognition failure: Whisper/Web Speech returned no usable phonemes.
+      // The user probably spoke correctly but the recognizer didn't catch it.
+      // Show "try again" instead of a false 0/100 score.
+      if (spoken.length === 0) {
+        errorMsg = t(lang, "unclear");
+        recState = "idle";
+        return;
+      }
+
       const result = detectErrors(target, spoken, confs);
       score = result.wordScore;
       errors = result.errors;
       phonemeScores = result.perPhonemeScore;
 
-      // Detect total recognition failure: 0 matches + very low confidence
-      // means the recognizer heard something completely different from the
-      // target. Don't score the user 0 — tell them recognition failed.
+      // Also catch total mismatch: 0 matches + low confidence means the
+      // recognizer heard something completely different from the target.
       if (result.matches === 0 && confs.every((c) => c < 0.5)) {
         errorMsg = t(lang, "unclear");
         recState = "idle";
