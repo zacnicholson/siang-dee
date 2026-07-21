@@ -186,7 +186,7 @@
     font-family: var(--font-body); color: var(--c-fg); min-height: 44px;
     transition: border-color 120ms var(--ease-out-quint);
   }
-  .search-input:focus { outline: none; border-color: var(--c-accent); }
+  .search-input:focus { border-color: var(--c-accent); }
   .search-input::placeholder { color: var(--c-fg-muted); }
   .search-results { display: flex; flex-direction: column; }
   .search-row {

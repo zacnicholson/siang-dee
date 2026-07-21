@@ -45,5 +45,5 @@
   .wave-row { display: flex; align-items: center; gap: var(--s-3); }
   .wave-label { width: 48px; flex-shrink: 0; text-align: right; }
   .wave-bars { display: flex; align-items: center; gap: 2px; flex: 1; height: 36px; }
-  .bar { width: 3px; min-height: 2px; border-radius: 1px; transition: height 200ms var(--ease-out-quint); }
+  .bar { width: 3px; min-height: 2px; border-radius: var(--r-sm); transition: height 200ms var(--ease-out-quint); }
 </style>

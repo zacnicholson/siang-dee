@@ -22,6 +22,7 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   import {
     IconMic, IconSquare, IconVolume2, IconGauge,
     IconChevronRight, IconRotateCcw, IconLoader2, IconCheck,
+    IconAlertCircle,
   } from "../lib/ui/Icons";
 
   let lang: Lang = $state("th");
@@ -36,9 +37,18 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   let wsController: WebSpeechController | null = null;
   let wsTranscript: string | null = null;
 
+  // Recording timer + level meter (live "listening" feedback)
+  let recStartTs = $state(0);
+  let recSeconds = $state(0);
+  let recTimerRaf = 0;
+  // Minimum recording time so the user actually has a chance to speak.
+  // Enforced both at stopRecord() and as a release debounce.
+  const MIN_REC_MS = 1500;
+
   // Result data
   let score: number | null = $state(null);
   let displayScore = $state(0); // animated count-up
+  let scoreBarFill = $state(0); // animated score-bar (kept in sync with displayScore)
   let errors: DetectedError[] = $state([]);
   let phonemeScores: number[] = $state([]);
   let spokenWords = $state("");
@@ -66,11 +76,23 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
     releaseWakeLock();
     if (lastAudioUrl) URL.revokeObjectURL(lastAudioUrl);
     cancelAnimationFrame(levelRaf);
+    cancelAnimationFrame(recTimerRaf);
   });
 
   function levelLoop() {
     if (recorder) micLevel = recorder.getLevel();
     levelRaf = requestAnimationFrame(levelLoop);
+  }
+
+  function tickRecTimer() {
+    if (recState === "recording") {
+      recSeconds = (performance.now() - recStartTs) / 1000;
+      recTimerRaf = requestAnimationFrame(tickRecTimer);
+    }
+  }
+
+  function stopRecTimer() {
+    cancelAnimationFrame(recTimerRaf);
   }
 
   async function startRecord() {
@@ -121,6 +143,10 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
       const s = $settings;
       if (s?.wakeLock !== false) await acquireWakeLock();
       recState = "recording";
+      recStartTs = performance.now();
+      recSeconds = 0;
+      tickRecTimer();
+      navigator.vibrate?.(10); // haptic confirmation that recording started
       levelLoop();
     } catch (e: any) {
       errorMsg = t(lang, "micDenied");
@@ -131,7 +157,20 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   async function stopRecord() {
     if (!recorder || recState !== "recording") return;
     cancelAnimationFrame(levelRaf);
+    stopRecTimer();
     micLevel = 0;
+    // Minimum-recording guard: enforce a floor so the user actually has time
+    // to speak. A sub-1.5s press gives Web Speech little time to fire and
+    // leaves Whisper with effectively nothing to transcribe. If the button
+    // was released too early, treat it as a slip — return to idle with a
+    // gentle "try again" rather than scoring hallucinated audio.
+    const elapsedMs = performance.now() - recStartTs;
+    if (elapsedMs < MIN_REC_MS && !wsTranscript) {
+      console.warn("[Siang Dee] Recording too short:", (elapsedMs / 1000).toFixed(2) + "s — skipping");
+      errorMsg = t(lang, "unclear");
+      recState = "idle";
+      return;
+    }
     recState = "analyzing";
     // Stop Web Speech recognition and wait for its result
     if (wsController) {
@@ -145,13 +184,12 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
     // Release wake lock now that recording is done
     await releaseWakeLock();
     const pcmData = await recorder.stop();
-    // Minimum-recording guard: a sub-second tap (or a finger that slipped off
-    // via pointerleave) gives Web Speech little time to fire and leaves Whisper
-    // with effectively nothing. If the clip is too short AND Web Speech didn't
-    // deliver a transcript, don't hallucinate — ask the user to try again.
+    // Secondary guard: a finger that slipped off via pointerleave can give
+    // Web Speech little time to fire. If the captured clip is also very short
+    // AND Web Speech didn't deliver a transcript, don't hallucinate.
     const recDurationSec = pcmData.length / 16000;
     if (recDurationSec < 1.2 && !wsTranscript) {
-      console.warn("[Siang Dee] Recording too short:", recDurationSec.toFixed(2) + "s, no Web Speech transcript — skipping recognition");
+      console.warn("[Siang Dee] PCM clip too short:", recDurationSec.toFixed(2) + "s, no Web Speech transcript — skipping recognition");
       errorMsg = t(lang, "unclear");
       recState = "idle";
       return;
@@ -266,35 +304,52 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
     }
   }
 
-  // 3-beat score reveal: frame settles → number counts → phonemes cascade
+  // 3-beat score reveal: frame settles (0–200ms) → number counts + bar fills
+  // (200–900ms) → phonemes cascade (900ms+). A haptic fires at reveal and a
+  // lighter one when the count lands, so the dopamine moment is felt.
   function animateScoreReveal(finalScore: number) {
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduced) { displayScore = finalScore; return; }
-    // Beat 2: count 0 → final over 700ms with ease-out-quint
-    const duration = 700;
-    const start = performance.now();
-    function tick(now: number) {
-      const elapsed = now - start;
-      const t = Math.min(elapsed / duration, 1);
-      // ease-out-quint: 1 - (1-t)^5
-      const eased = 1 - Math.pow(1 - t, 5);
-      displayScore = Math.round(eased * finalScore);
-      if (t < 1) requestAnimationFrame(tick);
-      else displayScore = finalScore;
-    }
-    requestAnimationFrame(tick);
+    if (reduced) { displayScore = finalScore; scoreBarFill = finalScore; return; }
+    navigator.vibrate?.(30); // haptic at reveal
+    // Beat 2: count 0 → final over 700ms with ease-out-quint, starting at +200ms
+    setTimeout(() => {
+      const duration = 700;
+      const start = performance.now();
+      function tick(now: number) {
+        const elapsed = now - start;
+        const tt = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - tt, 5);
+        displayScore = Math.round(eased * finalScore);
+        scoreBarFill = Math.round(eased * finalScore);
+        if (tt < 1) requestAnimationFrame(tick);
+        else { displayScore = finalScore; scoreBarFill = finalScore; navigator.vibrate?.(15); }
+      }
+      requestAnimationFrame(tick);
+    }, 200);
   }
 
   function playModel(slow = false): Promise<void> {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
       const s = $settings;
       if (s && s.muted) { resolve(); return; }
       hasPlayedModel = true;
       if (exercise.modelAudioUrl) {
-        const a = new Audio(exercise.modelAudioUrl);
-        a.playbackRate = slow ? 0.6 : 1.0;
-        a.onended = () => resolve();
-        a.play().catch(() => resolve());
+        // Route through the shared Web Audio path with a fade envelope so the
+        // model-playback button (one of the most-used in the app) doesn't
+        // cold-open the speaker with raw `new Audio()` (a guaranteed pop).
+        try {
+          await playAudioUrlWithFadeOut(exercise.modelAudioUrl);
+        } catch {
+          // Last-resort fallback only if the Web Audio path fails entirely.
+          try {
+            const a = new Audio(exercise.modelAudioUrl);
+            a.playbackRate = slow ? 0.6 : 1.0;
+            a.onended = () => resolve();
+            a.play().catch(() => resolve());
+            return;
+          } catch { resolve(); return; }
+        }
+        resolve();
       } else {
         speak(exercise.prompt, { lang: "en", rate: slow ? 0.6 : (s?.speakRate ?? 1) });
         // Estimate speech duration for auto-advance
@@ -311,8 +366,9 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   function retry() {
     cancelSpeech();
     recState = "idle";
-    score = null; displayScore = 0; errors = []; phonemeScores = []; spokenWords = "";
+    score = null; displayScore = 0; scoreBarFill = 0; errors = []; phonemeScores = []; spokenWords = "";
     wsController = null; wsTranscript = null;
+    recStartTs = 0; recSeconds = 0;
     // keep hasResult true — prior chips stay visible for comparison
     // keep attemptCount + bestScoreThisExercise — they track progress on this word
   }
@@ -327,9 +383,10 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
       exercise = EXERCISES[(idx + 1) % EXERCISES.length];
     }
     currentExerciseId.set(exercise.id);
-    recState = "idle"; score = null; displayScore = 0; errors = []; phonemeScores = [];
+    recState = "idle"; score = null; displayScore = 0; scoreBarFill = 0; errors = []; phonemeScores = [];
     spokenWords = ""; hasResult = false; canPlayYours = false;
     wsController = null; wsTranscript = null;
+    recStartTs = 0; recSeconds = 0;
     attemptCount = 0; bestScoreThisExercise = 0; hasPassed70 = false;
     prevAttemptAudio = null; prevAttemptScore = null;
   }
@@ -535,9 +592,9 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
         <span class="score-max t-body fg-muted">/100</span>
       </div>
       <div class="score-bar-track">
-        <div class="score-bar-fill" style="width: {score}%; background: {verdictColor(score)}"></div>
+        <div class="score-bar-fill" style="width: {scoreBarFill}%; background: {verdictColor(score)}"></div>
       </div>
-      {#if spokenWords && (score === null || score > 40)}
+      {#if spokenWords && score !== null && score > 40}
         <div class="heard">
           <span class="t-micro fg-muted" lang="th">ได้ยิน</span>
           <span class="t-caption">"{spokenWords}"</span>
@@ -580,7 +637,16 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   {/if}
 
   <!-- Record button -->
-  {#if recState !== "result" && !showModelDl}
+  {#if recState === "analyzing" && !showModelDl}
+    <!-- Analyzing card: calm progress indicator instead of a frozen button morph -->
+    <div class="analyzing-card" role="status" aria-live="polite">
+      <div class="analyzing-dots"><span></span><span></span><span></span></div>
+      <span class="t-body-lg" lang="th">{t(lang, "analyzingVowels")}</span>
+      <span class="t-caption fg-muted" lang="th">
+        {#if modelDl > 0 && modelDl < 1}กำลังโหลดโมเดล {Math.round(modelDl * 100)}%{:else}{t(lang, "analyzing")}{/if}
+      </span>
+    </div>
+  {:else if recState !== "result" && !showModelDl}
     <div class="record-zone">
       {#if echoMode}
         <button
@@ -590,23 +656,16 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
           aria-label={t(lang, "listenFirst")}
         >
           {#if recState === "recording"}
-            <div class="wave-bars">
-              {#each Array(5) as _, i}
-                <span class="bar" style="height: {8 + micLevel * 16 * (1 - Math.abs(i - 2) * 0.3)}px"></span>
-              {/each}
-            </div>
+            <span class="rec-ring"></span>
+            <span class="rec-timer t-num">{recSeconds.toFixed(1)}s</span>
             <IconSquare size={28} stroke-width={1.5} class="rec-icon" />
-          {:else if recState === "analyzing"}
-            <IconLoader2 size={28} stroke-width={2} class="spin" />
           {:else}
             <IconVolume2 size={32} stroke-width={2} />
           {/if}
         </button>
         <span class="rec-hint t-caption fg-muted" lang="th">
           {#if recState === "recording"}
-            {t(lang, "stop")} — ปล่อยเพื่อวิเคราะห์
-          {:else if recState === "analyzing"}
-            {t(lang, "analyzing")}
+            <span class="rec-dot"></span> {t(lang, "listening")} — {t(lang, "listeningHint")}
           {:else}
             {t(lang, "listenFirst")} — {t(lang, "repeatAfter")}
           {/if}
@@ -615,7 +674,6 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
         <button
           class="record-btn"
           class:recording={recState === "recording"}
-          class:analyzing={recState === "analyzing"}
           onpointerdown={onDown}
           onpointerup={onUp}
           onpointerleave={onUp}
@@ -623,25 +681,16 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
           disabled={recState === "analyzing"}
         >
           {#if recState === "recording"}
-            <!-- waveform bars -->
-            <div class="wave-bars">
-              {#each Array(5) as _, i}
-                <span class="bar" style="height: {8 + micLevel * 16 * (1 - Math.abs(i - 2) * 0.3)}px"></span>
-              {/each}
-            </div>
+            <span class="rec-ring"></span>
+            <span class="rec-timer t-num">{recSeconds.toFixed(1)}s</span>
             <IconSquare size={28} stroke-width={1.5} class="rec-icon" />
-          {:else if recState === "analyzing"}
-            <IconLoader2 size={28} stroke-width={2} class="spin" />
           {:else}
             <IconMic size={32} stroke-width={2} />
           {/if}
         </button>
         <span class="rec-hint t-caption fg-muted">
           {#if recState === "recording"}
-            {t(lang, "stop")} — ปล่อยเพื่อวิเคราะห์
-          {:else if recState === "analyzing"}
-            {t(lang, "analyzing")}
-            {#if modelDl > 0 && modelDl < 1}({Math.round(modelDl * 100)}%){/if}
+            <span class="rec-dot"></span> {t(lang, "listening")} — {t(lang, "listeningHint")}
           {:else}
             {t(lang, "record")} — กดค้างเพื่อพูด
           {/if}
@@ -673,7 +722,16 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   {/if}
 
   {#if errorMsg}
-    <p class="err-msg t-body" style="color: var(--c-danger)">⚠ {errorMsg}</p>
+    <div class="err-card" role="alert">
+      <IconAlertCircle size={18} stroke-width={2} class="err-icon" />
+      <div class="err-text">
+        <span class="t-body" lang="th">{errorMsg}</span>
+        <span class="t-micro fg-muted" lang="th">ปล่อยปุ่มในที่เงียบแล้วลองใหม่</span>
+      </div>
+      <button class="err-retry" onclick={retry} lang="th">
+        <IconRotateCcw size={16} stroke-width={2} /> {t(lang, "tryAgain")}
+      </button>
+    </div>
   {/if}
 </section>
 
@@ -798,26 +856,71 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   }
   .record-btn:active { transform: scale(0.96); }
   .record-btn.recording { background: var(--c-danger); }
-  .record-btn.analyzing { background: var(--c-surface-2); color: var(--c-fg-muted); }
   .record-btn:disabled { cursor: default; }
 
-  .wave-bars {
-    position: absolute;
-    top: -28px;
-    display: flex; align-items: flex-end; gap: 3px;
-    height: 24px;
+  /* Pulsing ring + timer + listening label while recording */
+  .rec-ring {
+    position: absolute; inset: -6px; border-radius: var(--r-circle);
+    border: 2px solid var(--c-danger); opacity: 0.5;
+    animation: rec-pulse 1.4s var(--ease-out-quint) infinite;
+    pointer-events: none;
   }
-  .wave-bars .bar {
-    width: 3px; background: var(--c-danger);
-    border-radius: var(--r-sm);
-    transition: height 80ms linear;
+  @keyframes rec-pulse {
+    0%   { transform: scale(1);    opacity: 0.5; }
+    70%  { transform: scale(1.18); opacity: 0; }
+    100% { transform: scale(1.18); opacity: 0; }
+  }
+  .rec-timer {
+    position: absolute; top: -30px; font-size: 13px; font-weight: 600;
+    color: var(--c-danger); font-feature-settings: "tnum";
   }
   .rec-icon { color: #fff; }
 
   .spin { animation: spin 0.9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .rec-hint { text-align: center; }
+  .rec-hint { text-align: center; display: inline-flex; align-items: center; gap: var(--s-2); justify-content: center; }
+  .rec-hint .rec-dot {
+    width: 8px; height: 8px; border-radius: var(--r-circle);
+    background: var(--c-danger); animation: rec-blink 1s steps(2) infinite;
+    flex-shrink: 0;
+  }
+  @keyframes rec-blink { 50% { opacity: 0.3; } }
+
+  /* Analyzing card — calm progress, not a frozen button morph */
+  .analyzing-card {
+    display: flex; flex-direction: column; align-items: center; gap: var(--s-4);
+    padding: var(--s-8) 0; width: 100%; text-align: center;
+  }
+  .analyzing-dots { display: inline-flex; gap: var(--s-2); }
+  .analyzing-dots span {
+    width: 8px; height: 8px; border-radius: var(--r-circle); background: var(--c-accent);
+    animation: dot-bounce 1s var(--ease-in-out) infinite;
+  }
+  .analyzing-dots span:nth-child(2) { animation-delay: 0.15s; }
+  .analyzing-dots span:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes dot-bounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+  }
+
+  /* Calm inline error card */
+  .err-card {
+    width: 100%; display: flex; align-items: center; gap: var(--s-4);
+    background: var(--c-surface);
+    border: 1px solid var(--c-danger);
+    border-left: 3px solid var(--c-danger); /* subtle severity, no fill */
+    border-radius: var(--r-0); padding: var(--s-4) var(--s-5);
+  }
+  .err-icon { color: var(--c-danger); flex-shrink: 0; }
+  .err-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .err-retry {
+    display: inline-flex; align-items: center; gap: var(--s-2);
+    background: none; border: 1px solid var(--c-rule); border-radius: var(--r-0);
+    padding: var(--s-2) var(--s-4); min-height: 44px; color: var(--c-fg); font-weight: 500;
+    flex-shrink: 0; transition: border-color 120ms var(--ease-out-quint);
+  }
+  .err-retry:hover { border-color: var(--c-danger); color: var(--c-danger); }
 
   /* Actions */
   .actions { display: flex; gap: var(--s-3); width: 100%; }
@@ -834,7 +937,7 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   .act-btn.primary { background: var(--c-accent); color: var(--c-accent-fg); border-color: var(--c-accent); }
   .act-btn.primary:hover { opacity: 0.9; }
 
-  .err-msg { text-align: center; }
+  .err-msg { text-align: center; } /* unused — kept for compatibility */
 
   .coach-note {
     width: 100%; background: var(--c-surface); border: 1px solid var(--c-rule);
@@ -865,5 +968,8 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
 
   @media (prefers-reduced-motion: reduce) {
     .score-panel, .chip, .panel-in { animation: none !important; }
+    .rec-ring, .rec-dot, .analyzing-dots span { animation: none !important; }
+    .rec-dot { opacity: 0.7; }
+    .analyzing-dots span { opacity: 0.7; }
   }
 </style>

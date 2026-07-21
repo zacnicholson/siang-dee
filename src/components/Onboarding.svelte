@@ -1,6 +1,6 @@
 <script lang="ts">
   import { settings, updateSettings, route } from "../stores/app";
-  import { speak, cancelSpeech } from "../lib/tts/speech";
+  import { speak, cancelSpeech, warmAudio, getWarmAudioContext } from "../lib/tts/speech";
   import { t, type Lang } from "../lib/i18n";
   import { fade } from "svelte/transition";
   import { IconMic, IconCheck, IconChevronRight, IconVolume2 } from "../lib/ui/Icons";
@@ -25,16 +25,24 @@
   async function startMicTest() {
     micTested = "recording";
     try {
+      // Arm the shared warm oscillator on this guaranteed user gesture so
+      // later speak()/playback find hot hardware and never cold-open the
+      // speaker (which is the audible pop).
+      warmAudio();
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioCtx = new AudioContext();
-      const source = audioCtx.createMediaStreamSource(micStream);
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      const buf = new Uint8Array(analyser.frequencyBinCount);
+      // Reuse the warm context for the mic analyser instead of a throwaway
+      // one we close afterwards (closing the context re-introduces the pop).
+      audioCtx = getWarmAudioContext() ?? (() => { try { return new AudioContext(); } catch { return null; } })();
+      const source = audioCtx ? audioCtx.createMediaStreamSource(micStream) : null;
+      if (audioCtx && source) {
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+      }
+      const buf = analyser ? new Uint8Array(analyser.frequencyBinCount) : null;
       let peak = 0;
       function loop() {
-        if (!analyser) return;
+        if (!analyser || !buf) return;
         analyser.getByteFrequencyData(buf);
         const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
         micLevel = Math.min(avg / 128, 1);
@@ -57,7 +65,10 @@
     micStream?.getTracks().forEach((tr) => tr.stop());
     micStream = null;
     analyser = null;
-    audioCtx?.close();
+    // Do NOT close the warm AudioContext — it's shared with speech/playback.
+    // Closing it would force the next audio action to cold-open a fresh
+    // context (the pop). Only null our local ref so we don't hold a stale
+    // pointer.
     audioCtx = null;
   }
 
@@ -134,7 +145,7 @@
                     <span class="meter-bar" style="height: {4 + micLevel * 28 * (1 - Math.abs(j - 3) * 0.2)}px"></span>
                   {/each}
                 </div>
-                <span class="t-caption fg-muted">...</span>
+                <span class="t-caption fg-muted mic-listening"><span class="mic-dot"></span> กำลังฟัง…</span>
               </div>
             {:else if micTested === "ok"}
               <div class="mic-result ok">
@@ -241,5 +252,14 @@
     background: var(--c-accent); color: var(--c-accent-fg);
     border: none; border-radius: var(--r-0); padding: var(--s-4);
     min-height: 44px; font-weight: 600;
+  }
+
+  .mic-listening { display: inline-flex; align-items: center; gap: var(--s-2); justify-content: center; }
+  .mic-dot { width: 8px; height: 8px; border-radius: var(--r-circle); background: var(--c-accent); animation: rec-blink 1s steps(2) infinite; flex-shrink: 0; }
+  @keyframes rec-blink { 50% { opacity: 0.3; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .step-content { transition: none; }
+    .mic-dot { animation: none; opacity: 0.7; }
   }
 </style>

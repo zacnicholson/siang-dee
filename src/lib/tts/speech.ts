@@ -106,25 +106,39 @@ let warmGain: GainNode | null = null;
 
 export function warmAudio() {
   if (warmCtx) {
-    if (warmCtx.state === "suspended") warmCtx.resume();
+    if (warmCtx.state === "suspended") warmCtx.resume().catch(() => {});
     return;
   }
   try {
-    warmCtx = new AudioContext();
-    if (warmCtx.state === "suspended") warmCtx.resume();
+    const Ctor = (typeof window !== "undefined" && (window.AudioContext || (window as any).webkitAudioContext)) || undefined;
+    if (!Ctor) return;
+    warmCtx = new Ctor();
+    if (warmCtx.state === "suspended") warmCtx.resume().catch(() => {});
 
-    // Continuous silent sine wave at 1Hz — keeps the audio device open
-    // but produces no audible output (gain = 0)
-    warmOsc = warmCtx.createOscillator();
-    warmOsc.frequency.value = 1; // 1Hz — far below human hearing
-    warmGain = warmCtx.createGain();
-    warmGain.gain.value = 0; // completely silent
-    warmOsc.connect(warmGain);
-    warmGain.connect(warmCtx.destination);
-    warmOsc.start();
+    // Only start the keep-alive oscillator if the context actually became
+    // runnable. If it's still suspended (no user gesture), starting the osc
+    // would be a no-op anyway and we'd rather not schedule a phantom node.
+    if (warmCtx.state === "running") {
+      // Continuous silent sine wave at 1Hz — keeps the audio device open
+      // but produces no audible output (gain = 0)
+      warmOsc = warmCtx.createOscillator();
+      warmOsc.frequency.value = 1; // 1Hz — far below human hearing
+      warmGain = warmCtx.createGain();
+      warmGain.gain.value = 0; // completely silent
+      warmOsc.connect(warmGain);
+      warmGain.connect(warmCtx.destination);
+      warmOsc.start();
+    }
   } catch {
     // AudioContext not available
   }
+}
+
+/** Returns the shared warm AudioContext (armed on first user gesture),
+ *  or null if it was never created. Other audio helpers reuse this so we
+ *  never cold-open a second hardware device (which itself pops). */
+export function getWarmAudioContext(): AudioContext | null {
+  return warmCtx;
 }
 
 export function waitForVoices(timeoutMs = 2000): Promise<void> {

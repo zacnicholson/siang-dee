@@ -17,3 +17,5 @@ export { default as IconLoader2 } from "lucide-svelte/icons/loader-2";
 export { default as IconTrendingUp } from "lucide-svelte/icons/trending-up";
 export { default as IconTrendingDown } from "lucide-svelte/icons/trending-down";
 export { default as IconCheck } from "lucide-svelte/icons/check";
+export { default as IconAlertCircle } from "lucide-svelte/icons/alert-circle";
+export { default as IconAudioWaveform } from "lucide-svelte/icons/audio-waveform";

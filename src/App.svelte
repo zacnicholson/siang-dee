@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { route, settings, loadSettings } from "./stores/app";
-  import { initSpeech } from "./lib/tts/speech";
+  import { initSpeech, warmAudio } from "./lib/tts/speech";
   import { checkReminderOnOpen, scheduleReminder } from "./lib/goals/reminder";
   import Home from "./views/Home.svelte";
   import Exercise from "./views/Exercise.svelte";
@@ -16,8 +16,25 @@
   let view = $derived($route);
   let loaded = $state(false);
 
+  // The Web Audio autoplay policy requires a user gesture to create/resume
+  // an AudioContext. Warm the silent oscillator once on the first tap/keypress
+  // anywhere in the app so every later speak()/playAudioUrl() finds hot
+  // hardware and never cold-opens the speaker (which is the audible pop).
+  function armAudioOnFirstGesture() {
+    const arm = () => {
+      warmAudio();
+      window.removeEventListener("pointerdown", arm);
+      window.removeEventListener("keydown", arm);
+      window.removeEventListener("touchstart", arm);
+    };
+    window.addEventListener("pointerdown", arm, { passive: true });
+    window.addEventListener("keydown", arm);
+    window.addEventListener("touchstart", arm, { passive: true });
+  }
+
   onMount(async () => {
     initSpeech();
+    armAudioOnFirstGesture();
     const s = await loadSettings();
     lang = s.uiLang;
     loaded = true;

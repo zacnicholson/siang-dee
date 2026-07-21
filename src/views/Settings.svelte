@@ -4,6 +4,7 @@
   import { speak, hasThaiVoice, voicesResolved, waitForVoices } from "../lib/tts/speech";
   import { requestNotificationPermission, scheduleReminder } from "../lib/goals/reminder";
   import { t, type Lang } from "../lib/i18n";
+  import { IconVolume2, IconAlertCircle } from "../lib/ui/Icons";
 
   let lang: Lang = $state("th");
   $effect(() => { const s = $settings; if (s) lang = s.uiLang; });
@@ -86,7 +87,7 @@
       <div class="meter-track bg-inset">
         <div class="meter-fill" style="width: {micLevel * 100}%"></div>
       </div>
-      <span class="t-micro fg-muted">{micActive ? "●" : "○"}</span>
+      <span class="mic-status t-micro" class:on={micActive} aria-hidden="true">●</span>
     </div>
 
     <div class="row">
@@ -114,9 +115,12 @@
       </div>
     </div>
 
-    <button class="test-btn" onclick={testVoice}>🔊 {t(lang, "testVoice")}</button>
+    <button class="test-btn" onclick={testVoice}>
+      <IconVolume2 size={18} stroke-width={2} />
+      <span>{t(lang, "testVoice")}</span>
+    </button>
     {#if voicesResolved() && !hasThaiVoice()}
-      <p class="warn t-caption">⚠ {t(lang, "noThaiVoice")}</p>
+      <p class="warn t-caption"><IconAlertCircle size={14} stroke-width={2} /> {t(lang, "noThaiVoice")}</p>
     {/if}
   </div>
 
@@ -230,24 +234,28 @@
   .segmented { display: inline-flex; border: 1px solid var(--c-rule); border-radius: var(--r-0); }
   .segmented button {
     background: none; border: none; border-right: 1px solid var(--c-rule);
-    padding: var(--s-2) var(--s-4); font-size: 13px; font-weight: 500;
-    color: var(--c-fg-muted); min-height: 32px;
+    padding: var(--s-3) var(--s-4); font-size: 13px; font-weight: 500;
+    color: var(--c-fg-muted); min-height: 44px;
     transition: color 120ms var(--ease-out-quint);
   }
   .segmented button:last-child { border-right: none; }
   .segmented button.active { color: var(--c-accent); background: var(--c-surface-2); }
 
   .test-btn {
+    display: flex; align-items: center; gap: var(--s-2);
     background: var(--c-surface); border: 1px solid var(--c-rule);
     border-radius: var(--r-0); padding: var(--s-3) var(--s-4);
     font-weight: 500; min-height: 44px; text-align: left;
   }
-  .warn { color: var(--c-warn); line-height: 1.4; }
+  .test-btn:hover { border-color: var(--c-accent); }
+  .mic-status { color: var(--c-fg-muted); transition: color 120ms var(--ease-out-quint); }
+  .mic-status.on { color: var(--c-success); }
+  .warn { color: var(--c-warn); line-height: 1.4; display: flex; align-items: flex-start; gap: var(--s-2); }
   .hint { line-height: 1.4; }
   .time-input {
     background: var(--c-surface); border: 1px solid var(--c-rule);
-    border-radius: var(--r-0); padding: var(--s-2) var(--s-3);
-    color: var(--c-fg); font-size: 14px; min-height: 32px;
+    border-radius: var(--r-0); padding: var(--s-3) var(--s-4);
+    color: var(--c-fg); font-size: 14px; min-height: 44px;
   }
   .privacy { line-height: 1.5; margin: 0; }
   .version { margin: 0; }

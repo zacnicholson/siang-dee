@@ -52,7 +52,7 @@
   );
 
   // Delta vs previous 7 days (simplified: compare last half to first half of recent)
-  const delta = $derived(() => {
+  const d = $derived((() => {
     if (attempts.length < 4) return 0;
     const half = Math.floor(attempts.length / 2);
     const recent = attempts.slice(0, half);
@@ -61,7 +61,7 @@
     const avgR = recent.reduce((s, a) => s + a.score, 0) / recent.length;
     const avgO = older.reduce((s, a) => s + a.score, 0) / older.length;
     return Math.round(avgR - avgO);
-  });
+  })());
 
   // Sparkline points (normalized 0..100)
   const sparkPoints = $derived(
@@ -104,7 +104,6 @@
       }
     } catch { beforeAfterMsg = null; }
   }
-  const d = $derived(delta());
   const allErrorIds = Object.keys(ERROR_CATEGORIES) as ErrorId[];
 </script>
 
@@ -176,7 +175,9 @@
       <span class="t-micro fg-muted" lang="th">{t(lang, "worstWords")}</span>
       <div class="worst-list">
         {#each worstWords as w}
-        <div class="worst-row rule-b" onclick={() => { currentExerciseId.set(w.exerciseId); route.set("exercise"); }} role="button" tabindex="0">
+        <div class="worst-row rule-b" onclick={() => { currentExerciseId.set(w.exerciseId); route.set("exercise"); }} role="button" tabindex="0"
+          onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); currentExerciseId.set(w.exerciseId); route.set("exercise"); } }}
+        >
             <span class="worst-word t-body-lg">{w.prompt}</span>
             <span class="worst-score t-display-l t-num" style="color: {w.avgScore >= 80 ? 'var(--c-success)' : w.avgScore >= 50 ? 'var(--c-warn)' : 'var(--c-danger)'}">{w.avgScore}</span>
             <span class="worst-meta t-micro fg-muted" lang="th">{w.attempts} ครั้ง</span>
@@ -257,13 +258,13 @@
   .worst-arrow { color: var(--c-fg-muted); flex-shrink: 0; }
   .worst-play {
     background: var(--c-surface); border: 1px solid var(--c-accent); color: var(--c-accent);
-    border-radius: var(--r-sm); padding: var(--s-1) var(--s-3); font-size: 11px;
-    flex-shrink: 0; min-height: 28px; white-space: nowrap;
+    border-radius: var(--r-sm); padding: var(--s-2) var(--s-4); font-size: 12px;
+    flex-shrink: 0; min-height: 36px; white-space: nowrap;
   }
   .before-after-toast {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     background: var(--c-surface); border: 1px solid var(--c-rule);
     border-radius: var(--r-0); padding: var(--s-3) var(--s-5);
-    z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 100;
   }
 </style>
