@@ -161,12 +161,18 @@ function transcriptToPhonemes(
     const bestWord = findBestWordMatch(transcript, targetWord);
     if (bestWord) {
       let phonemes = lookupIPA(bestWord);
-      if (!phonemes) phonemes = lookupIPA(targetWord.toLowerCase());
       if (phonemes) {
+        // The fuzzy-matched word is in the dictionary — use its phonemes.
         for (const p of phonemes) {
           result.push({ token: p, confidence: 0.7, start: 0, end: 1 });
         }
         return { phonemes: result, matchedWord: bestWord, confidence: 0.7 };
+      } else {
+        // The fuzzy-matched word is NOT in the dictionary.
+        // DO NOT fall back to the target word's phonemes — that would score
+        // the target against itself (false 100%). Instead, return empty so
+        // the caller shows "try again."
+        return { phonemes: [], matchedWord: "", confidence: 0 };
       }
     } else {
       // Whisper hallucinated something totally unrelated (e.g. "you" for "cup").
