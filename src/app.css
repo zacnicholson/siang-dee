@@ -1,0 +1,149 @@
+/* ════════════════════════════════════════════════════════════════
+   Siang Dee — Design System
+   Spec: /siang-dee-spec/SPEC.md  (ux-architect, 2026-07-20)
+   Principles: Calm · Tool-like · Legible-from-arm's-length
+   ════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Type ── */
+  --font-display: "IBM Plex Sans Thai Looped", "IBM Plex Sans Thai", "Noto Sans Thai", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans Thai Looped", "IBM Plex Sans Thai", "Noto Sans Thai", system-ui, sans-serif;
+  --font-ipa: "Scheherazade New", "Charis SIL", "Doulos SIL", "Noto Sans Mono", ui-monospace, monospace;
+  --font-num: "IBM Plex Sans Thai Looped", system-ui, sans-serif;
+
+  /* ── Spacing scale (4px base) ── */
+  --s-1: 2px;
+  --s-2: 4px;
+  --s-3: 8px;
+  --s-4: 12px;
+  --s-5: 16px;
+  --s-6: 24px;
+  --s-7: 32px;
+  --s-8: 48px;
+  --s-9: 64px;
+  --s-10: 96px;
+
+  /* ── Radius (4-step: 0 / 2px / circle / pill) ── */
+  --r-0: 0;
+  --r-sm: 2px;
+  --r-circle: 50%;
+  --r-pill: 9999px;
+
+  /* ── Easing (no ease/linear/bounce) ── */
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-quart: cubic-bezier(0.5, 0, 0.75, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ── Layout ── */
+  --max-w: 480px;
+  --nav-h: 56px;
+
+  /* ── Dark theme (default) ── */
+  --c-bg: #101114;
+  --c-surface: #17181C;
+  --c-surface-2: #1E2026;
+  --c-fg: #F2F3F5;
+  --c-fg-muted: #9A9CA5;
+  --c-rule: #2A2C33;
+  --c-accent: #5B7CFF;
+  --c-accent-fg: #0A0B0E;
+  --c-success: #5FCE8A;
+  --c-warn: #F2C94C;
+  --c-danger: #EB5757;
+  --c-score-fg: #F2F3F5;
+
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --c-bg: #F7F7F4;
+    --c-surface: #FFFFFF;
+    --c-surface-2: #EDEDE7;
+    --c-fg: #1A1A1F;
+    --c-fg-muted: #6B6C75;
+    --c-rule: #D9D9D2;
+    --c-accent: #3D5AFE;
+    --c-accent-fg: #FFFFFF;
+    --c-success: #1A9F58;
+    --c-warn: #C28410;
+    --c-danger: #C53030;
+    --c-score-fg: #1A1A1F;
+    color-scheme: light;
+  }
+}
+
+/* ── Base reset ── */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--c-bg);
+  color: var(--c-fg);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+button { font-family: inherit; cursor: pointer; color: inherit; }
+button:focus-visible, [role="button"]:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+/* ── Type scale ── */
+.t-display-xl { font-size: 56px; line-height: 1.05; font-weight: 600; letter-spacing: -0.02em; }
+.t-display-l  { font-size: 40px; line-height: 1.1;  font-weight: 600; letter-spacing: -0.01em; }
+.t-h1         { font-size: 28px; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; }
+.t-h2         { font-size: 22px; line-height: 1.3;  font-weight: 600; }
+.t-body-lg    { font-size: 17px; line-height: 1.45; font-weight: 400; }
+.t-body       { font-size: 15px; line-height: 1.5;  font-weight: 400; }
+.t-caption    { font-size: 13px; line-height: 1.4;  font-weight: 500; letter-spacing: 0.01em; }
+.t-micro      { font-size: 11px; line-height: 1.3;  font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.t-ipa        { font-family: var(--font-ipa); font-size: 32px; line-height: 1.1; font-weight: 500; }
+.t-ipa-sm     { font-family: var(--font-ipa); font-size: 20px; line-height: 1.2; font-weight: 500; }
+.t-num        { font-family: var(--font-num); font-feature-settings: "tnum"; }
+
+/* Thai eyebrows: NO uppercase, NO wide tracking */
+.t-micro:lang(th), .t-micro [lang="th"] { text-transform: none; letter-spacing: 0; }
+
+/* ── Safe area ── */
+.safe-top    { padding-top: calc(env(safe-area-inset-top) + 8px); }
+.safe-bottom { padding-bottom: calc(env(safe-area-inset-bottom) + 24px); }
+.safe-x      { padding-left: calc(env(safe-area-inset-left) + 16px); padding-right: calc(env(safe-area-inset-right) + 16px); }
+
+/* ── Color utilities ── */
+.fg         { color: var(--c-fg); }
+.fg-muted   { color: var(--c-fg-muted); }
+.bg-surface { background: var(--c-surface); }
+.bg-inset   { background: var(--c-surface-2); }
+
+/* ── Hairline rule ── */
+.rule { border: 0; border-top: 1px solid var(--c-rule); margin: 0; }
+.rule-b { border-bottom: 1px solid var(--c-rule); }
+
+/* ── Score verdict helpers ── */
+.score-success { color: var(--c-success); }
+.score-warn    { color: var(--c-warn); }
+.score-danger  { color: var(--c-danger); }
+
+/* ── Tap target floor ── */
+.tap { min-height: 44px; min-width: 44px; }
+
+/* ── Score color threshold ── */
+.score-color { color: var(--c-fg); } /* number is always solid fg */
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
