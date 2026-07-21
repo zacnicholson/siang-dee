@@ -144,9 +144,20 @@
 
     try {
       const rec = await getRecognizer();
-      const iv = setInterval(() => { modelDl = rec.loadProgress(); }, 200);
+      // If Web Speech failed and we need to load Whisper on-demand, show progress
+      if (!wsTranscript && rec.loadProgress() < 1) {
+        showModelDl = true;
+        modelDlPhase = "downloading";
+        modelDlProgress = 0;
+      }
+      const iv = setInterval(() => {
+        modelDl = rec.loadProgress();
+        modelDlProgress = modelDl;
+        if (modelDl >= 1) { clearInterval(iv); showModelDl = false; }
+      }, 200);
       const words = await rec.recognizeWords(pcmData, wsTranscript ?? undefined);
       clearInterval(iv);
+      showModelDl = false;
       spokenWords = words.map((w) => w.word).join(" ");
       console.log("[Siang Dee] Final transcript:", spokenWords, "| Web Speech:", wsTranscript, "| target:", exercise.prompt);
       const recognized: RecognizedPhoneme[] = await rec.recognize(pcmData, exercise.prompt, wsTranscript ?? undefined);

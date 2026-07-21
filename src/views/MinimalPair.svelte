@@ -7,6 +7,7 @@
   import { createMicRecorder, pcmToWav, type MicRecorder } from "../lib/audio/mic";
   import { acquireWakeLock, releaseWakeLock } from "../lib/audio/wakelock";
   import { getRecognizer, needsModelDownload, preloadModel, type RecognizedPhoneme } from "../lib/audio/recognizer";
+  import type { WebSpeechController } from "../lib/audio/webspeech-recognizer";
   import { buildFeedback, summaryTh } from "../lib/feedback/templates";
   import { saveAttempt } from "../lib/storage/db";
   import { t, type Lang } from "../lib/i18n";
@@ -31,6 +32,8 @@
   let recorder: MicRecorder | null = null;
   let micLevel = $state(0);
   let levelRaf = 0;
+  let wsController: WebSpeechController | null = null;
+  let wsTranscript: string | null = null;
   let scores = $state<[number | null, number | null]>([null, null]);
   let showModelDl = $state(false);
   let modelDlProgress = $state(0);
@@ -92,6 +95,19 @@
     try {
       if (!recorder) recorder = await createMicRecorder();
       await recorder.start();
+      // Start Web Speech in parallel
+      const rec = await getRecognizer();
+      wsController = rec.startWebSpeech?.(word) ?? null;
+      wsTranscript = null;
+      if (wsController) {
+        wsController.result.then((r) => {
+          wsTranscript = r.transcript;
+          console.log("[Siang Dee] Web Speech heard:", r.transcript, "| target:", word);
+        }).catch((e) => {
+          console.log("[Siang Dee] Web Speech failed:", e.message);
+          wsTranscript = null;
+        });
+      }
       const s = $settings;
       if (s?.wakeLock !== false) await acquireWakeLock();
       levelLoop();
@@ -107,6 +123,14 @@
     cancelAnimationFrame(levelRaf);
     micLevel = 0;
     recState = "analyzing";
+    // Stop Web Speech and wait for result
+    if (wsController) {
+      wsController.stop();
+      await Promise.race([
+        wsController.result.then(() => {}).catch(() => {}),
+        new Promise((r) => setTimeout(r, 2000)),
+      ]);
+    }
     await releaseWakeLock();
     const pcmData = await recorder.stop();
 
@@ -114,7 +138,18 @@
       const rec = await getRecognizer();
       const word = speakingIdx === 0 ? firstWord : secondWord;
       const targetEx = speakingIdx === 0 ? currentPair : pairPartner;
-      const recognized: RecognizedPhoneme[] = await rec.recognize(pcmData, word);
+      // Show model download if Whisper fallback is loading
+      if (!wsTranscript && rec.loadProgress() < 1) {
+        showModelDl = true;
+        modelDlProgress = 0;
+      }
+      const iv = setInterval(() => {
+        modelDlProgress = rec.loadProgress();
+        if (modelDlProgress >= 1) { clearInterval(iv); showModelDl = false; }
+      }, 200);
+      const recognized: RecognizedPhoneme[] = await rec.recognize(pcmData, word, wsTranscript ?? undefined);
+      clearInterval(iv);
+      showModelDl = false;
       const spoken = recognized.map((r) => r.token);
       const confs = recognized.map((r) => r.confidence);
       const target = targetEx.targetPhonemes as Phoneme[];

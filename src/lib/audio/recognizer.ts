@@ -4,8 +4,8 @@
  * 1. PRIMARY: Web Speech API (browser's built-in engine). Far more accurate
  *    for short words, zero download, works offline on iOS. The browser does
  *    its own live mic capture in parallel with our PCM recorder.
- * 2. FALLBACK: transformers.js + Whisper-tiny (ONNX). Used when Web Speech
- *    is unavailable (rare — only on very old browsers without webkit prefix).
+ * 2. FALLBACK: transformers.js + Whisper-tiny (ONNX). Loaded on-demand only
+ *    when Web Speech is unavailable or fails at runtime (e.g. network error).
  *
  * Both paths produce a word-level transcript → we map words to IPA phonemes
  * via the dictionary → feed to alignment + scoring.
@@ -36,13 +36,16 @@ export interface Recognizer {
 let pipeline: any = null;
 let progress = 0;
 let ready = false;
-let loadPromise: Promise<Recognizer> | null = null;
+let loadPromise: Promise<void> | null = null;
 
 const MODEL_ID = "Xenova/whisper-tiny.en";
 
-/** Returns true if the model hasn't been downloaded yet (first run). */
+/**
+ * Returns true if the model hasn't been downloaded yet (first run).
+ * If Web Speech is supported, we don't need the model upfront — but we might
+ * need it later as a fallback, so this returns false to skip the preload UI.
+ */
 export function needsModelDownload(): boolean {
-  // If Web Speech is supported, we don't need the model at all
   if (isWebSpeechSupported()) return false;
   return !ready && !loadPromise;
 }
@@ -54,22 +57,37 @@ export async function preloadModel(onProgress?: (p: number) => void): Promise<vo
   if (ready) { onProgress?.(1); return; }
   const check = setInterval(() => { onProgress?.(progress); }, 200);
   try {
-    await getRecognizer();
+    await ensureWhisperLoaded();
   } finally {
     clearInterval(check);
     onProgress?.(1);
   }
 }
 
+/**
+ * Get the recognizer API. If Web Speech is supported, returns immediately
+ * without loading Whisper. Whisper will be loaded on-demand if needed.
+ */
 export async function getRecognizer(): Promise<Recognizer> {
-  if (ready) return makeApi();
-  if (loadPromise) return loadPromise;
-  // If Web Speech is supported, we don't need Whisper at all
   if (isWebSpeechSupported()) {
     ready = true;
     progress = 1;
     return makeApi();
   }
+  // No Web Speech — must load Whisper
+  await ensureWhisperLoaded();
+  return makeApi();
+}
+
+/**
+ * Load Whisper on-demand. Called when the fallback path is needed
+ * (Web Speech unsupported or failed at runtime).
+ * Shows a progress indicator via the `progress` variable.
+ */
+async function ensureWhisperLoaded(onProgress?: (p: number) => void): Promise<void> {
+  if (pipeline) return;
+  if (loadPromise) { await loadPromise; return; }
+
   loadPromise = (async () => {
     try {
       const { pipeline: makePipeline, env } = await import("@huggingface/transformers");
@@ -85,21 +103,21 @@ export async function getRecognizer(): Promise<Recognizer> {
         progress_callback: (info: any) => {
           if (info.status === "progress" && info.progress != null) {
             progress = info.progress;
+            onProgress?.(info.progress);
           } else if (info.status === "ready") {
-            ready = true;
             progress = 1;
+            onProgress?.(1);
           }
         },
       });
-      ready = true;
       progress = 1;
-      return makeApi();
+      ready = true;
     } catch (e) {
       loadPromise = null;
       throw e;
     }
   })();
-  return loadPromise;
+  await loadPromise;
 }
 
 /**
@@ -140,7 +158,7 @@ function transcriptToPhonemes(
         return { phonemes: result, matchedWord: bestWord, confidence: 0.7 };
       }
     } else {
-      // Whisper heard something but it doesn't match the target at all
+      // Heard something but it doesn't match the target at all
       // Use target phonemes with low confidence so scoring can flag errors
       const targetPhonemes = lookupIPA(targetWord.toLowerCase());
       if (targetPhonemes) {
@@ -177,8 +195,13 @@ function makeApi(): Recognizer {
         }));
       }
 
-      // Fallback: Whisper path
-      if (!pipeline) throw new Error("recognizer not loaded");
+      // Fallback: Whisper path — load on-demand if not yet loaded
+      if (!pipeline) {
+        console.log("[Siang Dee] Web Speech failed, loading Whisper fallback...");
+        await ensureWhisperLoaded((p) => { progress = p; });
+      }
+      if (!pipeline) throw new Error("Failed to load Whisper fallback");
+
       const minLen = 16000;
       let audio = pcm;
       if (audio.length < minLen) {
