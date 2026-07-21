@@ -119,10 +119,26 @@ function transcriptToPhonemes(
   const result: RecognizedPhoneme[] = [];
   let matched = false;
 
-  // Try to match each recognized word to the dictionary
+  // Try to match each recognized word to the dictionary.
+  // BUT: if we have a target word, only trust dictionary matches that are
+  // close to the target — Whisper hallucinates common short words like
+  // "you", "the", "a" from silence/noise, which are real dictionary words.
   for (const w of words) {
     let phonemes = lookupIPA(w.toLowerCase());
     if (phonemes) {
+      // If we have a target, check if this word is plausibly the target
+      if (targetWord) {
+        const cleanWord = w.toLowerCase().replace(/[^a-z']/g, "");
+        const cleanTarget = targetWord.toLowerCase().replace(/[^a-z']/g, "");
+        // For multi-word targets (sentences), check if the word is in the target
+        const targetWords = cleanTarget.split(/\s+/);
+        const isTargetWord = targetWords.some((tw) => isWordMatch(cleanWord, tw));
+        if (!isTargetWord) {
+          // Recognized word is a real dictionary word but doesn't match target.
+          // Skip it — it's likely a hallucination. Don't set `matched = true`.
+          continue;
+        }
+      }
       matched = true;
       for (const p of phonemes) {
         result.push({ token: p, confidence: 0.85, start: 0, end: 1 });
