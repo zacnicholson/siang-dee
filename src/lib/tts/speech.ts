@@ -114,15 +114,27 @@ export function warmAudio() {
     if (!Ctor) return;
     warmCtx = new Ctor();
 
-    // Continuous silent sine wave at 1Hz — keeps the audio device open
-    // but produces no audible output (gain = 0). Start the oscillator
-    // even if suspended — it will begin running once resume() completes.
+    // Keep the audio hardware permanently open with a near-silent oscillator.
+    // gain = 0 lets the browser optimize the node away (no output → no work
+    // → hardware closes → next speechSynthesis call cold-opens → POP).
+    // 0.001 is inaudible but forces the browser to keep rendering audio.
     warmOsc = warmCtx.createOscillator();
     warmOsc.frequency.value = 1; // 1Hz — far below human hearing
     warmGain = warmCtx.createGain();
-    warmGain.gain.value = 0; // completely silent
+    warmGain.gain.value = 0.001; // near-silent — keeps hardware alive
+
+    // Compressor/limiter catches any transient clicks from speechSynthesis
+    // that leak through the shared hardware path on macOS.
+    const limiter = warmCtx.createDynamicsCompressor();
+    limiter.threshold.value = -50;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.05;
+
     warmOsc.connect(warmGain);
-    warmGain.connect(warmCtx.destination);
+    warmGain.connect(limiter);
+    limiter.connect(warmCtx.destination);
     warmOsc.start();
 
     if (warmCtx.state === "suspended") warmCtx.resume().catch(() => {});
@@ -186,6 +198,15 @@ export function speak(text: string, opts: SpeakOptions = {}) {
       speakingNow = false;
       opts.onEnd?.();
     };
+
+    // On macOS Chrome, speechSynthesis pops at the start of each utterance
+    // because it cold-opens the audio device. A tiny pre-roll of silence
+    // via our warm AudioContext before the utterance helps the device
+    // transition smoothly. The warm oscillator is already doing this, but
+    // we also ensure the context is resumed right before speaking.
+    if (warmCtx && warmCtx.state === "suspended") {
+      warmCtx.resume().catch(() => {});
+    }
     speechSynthesis.speak(u);
   } catch { /* ignore — text fallback */ }
 }
