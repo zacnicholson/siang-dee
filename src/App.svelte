@@ -2,12 +2,6 @@
   import { onMount } from "svelte";
   import { route, settings, loadSettings } from "./stores/app";
   import { initSpeech } from "./lib/tts/speech";
-  import Home from "./views/Home.svelte";
-  import Exercise from "./views/Exercise.svelte";
-  import MinimalPair from "./views/MinimalPair.svelte";
-  import SettingsView from "./views/Settings.svelte";
-  import ProgressView from "./views/Progress.svelte";
-  import Onboarding from "./components/Onboarding.svelte";
   import { IconHouse, IconAudioLines, IconBarChart3, IconSettings } from "./lib/ui/Icons";
   import { t, type Lang } from "./lib/i18n";
 
@@ -38,28 +32,52 @@
     { id: "progress", label: t(lang, "progress"), icon: IconBarChart3 },
     { id: "settings", label: t(lang, "settings"), icon: IconSettings },
   ]);
+
+  // Lazy-loaded view module cache
+  const viewCache: Record<string, any> = {};
+  async function loadView(id: string) {
+    if (viewCache[id]) return viewCache[id];
+    let mod;
+    switch (id) {
+      case "home": mod = await import("./views/Home.svelte"); break;
+      case "exercise": mod = await import("./views/Exercise.svelte"); break;
+      case "minimalpair": mod = await import("./views/MinimalPair.svelte"); break;
+      case "settings": mod = await import("./views/Settings.svelte"); break;
+      case "progress": mod = await import("./views/Progress.svelte"); break;
+      default: return null;
+    }
+    viewCache[id] = mod.default;
+    return mod.default;
+  }
+  // Trigger load for current view
+  let currentViewComp = $state<any>(null);
+  $effect(() => {
+    const v = view;
+    loadView(v).then((c) => { currentViewComp = c; });
+  });
 </script>
 
 {#if loaded && showOnboarding}
   <div class="shell">
     <main class="content safe-top">
-      <Onboarding />
+      {#await import("./components/Onboarding.svelte") then { default: Comp }}
+        <Comp />
+      {:catch}
+        <div class="view-enter"><p class="t-body fg-muted">Loading…</p></div>
+      {/await}
     </main>
   </div>
-{:else}
+{:else if loaded}
   <div class="shell">
     <!-- View content (scrollable) -->
     <main class="content safe-top">
-      {#if view === "home"}
-        {#key "home"}<div class="view-enter"><Home /></div>{/key}
-      {:else if view === "exercise"}
-        {#key "ex"}<div class="view-enter-push"><Exercise /></div>{/key}
-      {:else if view === "minimalpair"}
-        {#key "mp"}<div class="view-enter-push"><MinimalPair /></div>{/key}
-      {:else if view === "settings"}
-        {#key "set"}<div class="view-enter"><SettingsView /></div>{/key}
-      {:else if view === "progress"}
-        {#key "prog"}<div class="view-enter"><ProgressView /></div>{/key}
+      {#if currentViewComp}
+        {@const Comp = currentViewComp}
+        <div class="view-enter" key={view}>
+          <Comp />
+        </div>
+      {:else}
+        <div class="view-enter"><p class="t-body fg-muted">…</p></div>
       {/if}
     </main>
 
@@ -131,18 +149,13 @@
 
   /* View entrance — pure crossfade, no slide cascade */
   .view-enter { animation: fade-in 120ms var(--ease-out-quint); }
-  .view-enter-push { animation: push-in 220ms var(--ease-out-quint); }
 
   @keyframes fade-in {
     from { opacity: 0; }
     to { opacity: 1; }
   }
-  @keyframes push-in {
-    from { opacity: 0; transform: translateX(16px); }
-    to { opacity: 1; transform: translateX(0); }
-  }
 
   @media (prefers-reduced-motion: reduce) {
-    .view-enter, .view-enter-push { animation: none; }
+    .view-enter { animation: none; }
   }
 </style>
