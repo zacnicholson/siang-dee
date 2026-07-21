@@ -8,16 +8,29 @@
 
 let playbackCtx: AudioContext | null = null;
 
-function getCtx(): AudioContext {
+function getCtx(): AudioContext | null {
   if (!playbackCtx || playbackCtx.state === "closed") {
-    playbackCtx = new AudioContext();
+    try {
+      playbackCtx = new AudioContext();
+    } catch {
+      return null; // AudioContext not available (no user gesture yet)
+    }
   }
-  if (playbackCtx.state === "suspended") playbackCtx.resume();
+  if (playbackCtx.state === "suspended") playbackCtx.resume().catch(() => {});
   return playbackCtx;
 }
 
 export async function playAudioUrlWithFadeOut(url: string, fadeMs = 40): Promise<void> {
   const ctx = getCtx();
+  if (!ctx) {
+    // Fallback to plain Audio() if AudioContext isn't available
+    try {
+      const audio = new Audio(url);
+      await audio.play();
+      await new Promise((r) => audio.addEventListener("ended", r));
+    } catch {}
+    return;
+  }
   const res = await fetch(url);
   const arr = await res.arrayBuffer();
   const audioBuf = await ctx.decodeAudioData(arr);

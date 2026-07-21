@@ -123,10 +123,16 @@ export function startWebSpeechRecognition(
     };
 
     recognition.onerror = (event: any) => {
+      // "network" errors are transient on Chrome (Google's online engine).
+      // "aborted" happens when we stop() it ourselves. Don't treat these as fatal.
       if (event.error === "no-speech" || event.error === "aborted") {
         fail(new Error(`no speech detected: ${event.error}`));
       } else if (event.error === "not-allowed") {
         fail(new Error("microphone permission denied"));
+      } else if (event.error === "network") {
+        // Transient — let onend handle it. Don't reject yet; the caller
+        // will fall back to Whisper if we never get a result.
+        console.warn("[Siang Dee] Web Speech network error — will fall back to Whisper if no result");
       } else {
         fail(new Error(`recognition error: ${event.error}`));
       }

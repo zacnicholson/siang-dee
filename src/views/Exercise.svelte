@@ -14,7 +14,7 @@
   import type { WebSpeechController } from "../lib/audio/webspeech-recognizer";
 import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   import { buildFeedback, summaryTh } from "../lib/feedback/templates";
-  import { speak, speakSequence, cancelSpeech, hasThaiVoice, waitForVoices } from "../lib/tts/speech";
+  import { speak, speakSequence, cancelSpeech, hasThaiVoice, waitForVoices, warmAudio } from "../lib/tts/speech";
   import { saveAttempt, getRecentAttempts, getAudio, type Attempt } from "../lib/storage/db";
   import { pickNextAdaptive } from "../lib/goals/adaptive";
   import { t, type Lang } from "../lib/i18n";
@@ -76,6 +76,7 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   async function startRecord() {
     errorMsg = null;
     cancelSpeech();
+    warmAudio(); // warm AudioContext on user gesture (record button press)
     score = null; errors = []; phonemeScores = []; spokenWords = "";
     hasResult = false; canPlayYours = false;
 
@@ -178,6 +179,15 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
       score = result.wordScore;
       errors = result.errors;
       phonemeScores = result.perPhonemeScore;
+
+      // Detect total recognition failure: 0 matches + very low confidence
+      // means the recognizer heard something completely different from the
+      // target. Don't score the user 0 — tell them recognition failed.
+      if (result.matches === 0 && confs.every((c) => c < 0.5)) {
+        errorMsg = t(lang, "unclear");
+        recState = "idle";
+        return;
+      }
 
       // Track retry loop state
       attemptCount++;

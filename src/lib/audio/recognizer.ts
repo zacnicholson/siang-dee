@@ -219,8 +219,10 @@ function makeApi(): Recognizer {
       // @ts-ignore
       const out = await pipeline(audio, {
         return_timestamps: false,
-        max_new_tokens: 16,
+        max_new_tokens: 8, // tighter limit — single words need very few tokens
         sampling_rate: 16000,
+        // @ts-ignore
+        chunk_length_s: 1, // short clips — don't let Whisper hallucinate filler
       });
       const text: string = (out?.text ?? "").trim();
 
