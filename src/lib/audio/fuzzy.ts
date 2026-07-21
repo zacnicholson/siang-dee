@@ -66,7 +66,12 @@ export function findBestWordMatch(
   }
 
   // If the best match is close enough, return it.
-  // Threshold: distance ≤ 2 (allows "like"→"light" but NOT "you"→"cup" which is 3)
-  if (best && bestDist <= 2) return best;
+  // Threshold scales with word length: short words need tighter matching
+  // because edit distance 2 on a 3-letter word (you→dog) is actually a
+  // completely different word with no phoneme overlap. Long words can
+  // tolerate more edits (constitution→constitutional).
+  const maxLen = Math.max(target.length, best ? best.length : 0);
+  const threshold = maxLen <= 4 ? 1 : maxLen <= 6 ? 2 : 3;
+  if (best && bestDist <= threshold) return best;
   return null;
 }

@@ -113,22 +113,19 @@ export function warmAudio() {
     const Ctor = (typeof window !== "undefined" && (window.AudioContext || (window as any).webkitAudioContext)) || undefined;
     if (!Ctor) return;
     warmCtx = new Ctor();
-    if (warmCtx.state === "suspended") warmCtx.resume().catch(() => {});
 
-    // Only start the keep-alive oscillator if the context actually became
-    // runnable. If it's still suspended (no user gesture), starting the osc
-    // would be a no-op anyway and we'd rather not schedule a phantom node.
-    if (warmCtx.state === "running") {
-      // Continuous silent sine wave at 1Hz — keeps the audio device open
-      // but produces no audible output (gain = 0)
-      warmOsc = warmCtx.createOscillator();
-      warmOsc.frequency.value = 1; // 1Hz — far below human hearing
-      warmGain = warmCtx.createGain();
-      warmGain.gain.value = 0; // completely silent
-      warmOsc.connect(warmGain);
-      warmGain.connect(warmCtx.destination);
-      warmOsc.start();
-    }
+    // Continuous silent sine wave at 1Hz — keeps the audio device open
+    // but produces no audible output (gain = 0). Start the oscillator
+    // even if suspended — it will begin running once resume() completes.
+    warmOsc = warmCtx.createOscillator();
+    warmOsc.frequency.value = 1; // 1Hz — far below human hearing
+    warmGain = warmCtx.createGain();
+    warmGain.gain.value = 0; // completely silent
+    warmOsc.connect(warmGain);
+    warmGain.connect(warmCtx.destination);
+    warmOsc.start();
+
+    if (warmCtx.state === "suspended") warmCtx.resume().catch(() => {});
   } catch {
     // AudioContext not available
   }

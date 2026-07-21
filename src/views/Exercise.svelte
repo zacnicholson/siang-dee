@@ -416,8 +416,17 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
     return "var(--c-danger)";
   }
 
-  function onDown(e: PointerEvent) { e.preventDefault(); startRecord(); }
-  function onUp() { if (recState === "recording") stopRecord(); }
+  // Tap-to-start/tap-to-stop: press-and-hold is fragile on trackpads
+  // (pointerleave fires on the slightest finger shift, killing the recording
+  // before the user speaks). A tap toggle is reliable on all platforms.
+  function onRecordTap(e: PointerEvent) {
+    e.preventDefault();
+    if (recState === "recording") {
+      stopRecord();
+    } else if (recState === "idle") {
+      startRecord();
+    }
+  }
 
   // Echo mode: play model → auto-start recording
   async function startEchoRecord() {
@@ -651,9 +660,9 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
       {#if echoMode}
         <button
           class="record-btn echo"
-          onpointerdown={() => startEchoRecord()}
-          disabled={recState === "analyzing" || recState === "recording"}
-          aria-label={t(lang, "listenFirst")}
+          onpointerdown={(e) => { e.preventDefault(); if (recState === "recording") stopRecord(); else if (recState === "idle") startEchoRecord(); }}
+          disabled={recState === "analyzing"}
+          aria-label={recState === "recording" ? t(lang, "stop") : t(lang, "listenFirst")}
         >
           {#if recState === "recording"}
             <span class="rec-ring"></span>
@@ -674,10 +683,8 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
         <button
           class="record-btn"
           class:recording={recState === "recording"}
-          onpointerdown={onDown}
-          onpointerup={onUp}
-          onpointerleave={onUp}
-          aria-label={t(lang, "record")}
+          onpointerdown={onRecordTap}
+          aria-label={recState === "recording" ? t(lang, "stop") : t(lang, "record")}
           disabled={recState === "analyzing"}
         >
           {#if recState === "recording"}
