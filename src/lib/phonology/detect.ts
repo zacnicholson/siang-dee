@@ -88,20 +88,24 @@ export function detectErrors(
     }
   }
 
-  // Deduplicate: keep only one error per errorId+position, and collapse
-  // consecutive same-type errors into one (e.g. multiple E3 deletions → one)
+  // Deduplicate: keep only one error per errorId+position (not just errorId).
+  // Multiple E3 deletions at different positions are all real errors.
   const seen = new Set<string>();
   const deduped: DetectedError[] = [];
   for (const e of errors) {
-    const key = `${e.errorId}`;
+    const key = `${e.errorId}:${e.position}`;
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(e);
   }
 
+  // Severity-weighted word score: start from match ratio, subtract sum of
+  // error severities (not a flat -4 per error). A minor E12 (severity 2)
+  // costs less than a major E1 /l/→/r/ swap (severity 18).
   const total = target.length || 1;
   const matches = aligned.matches;
-  const wordScore = Math.round(Math.max(0, Math.min(100, (matches / total) * 100 - (errors.length * 4))));
+  const severityPenalty = deduped.reduce((sum, e) => sum + (SEVERITY[e.errorId] ?? 4), 0);
+  const wordScore = Math.round(Math.max(0, Math.min(100, (matches / total) * 100 - severityPenalty)));
 
   return { errors: deduped, perPhonemeScore, wordScore, matches, total };
 }

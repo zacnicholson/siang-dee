@@ -7,7 +7,7 @@
  *  - iOS Safari requires a user gesture before first speech
  *  - no Thai voice installed → graceful degrade + hint
  *  - Voice selection: prefer natural/premium voices over robotic system defaults
- *  - End-of-utterance audio pop: keep audio output "warm" during TTS
+ *  - End-of-utterance audio pop: keep audio hardware warm with a silent oscillator
  */
 
 export interface SpeakOptions {
@@ -92,6 +92,41 @@ export function initSpeech() {
   }
 }
 
+/**
+ * "Warm" the audio hardware by creating an AudioContext with a continuous
+ * silent oscillator. This prevents the speaker click/pop that occurs when
+ * speechSynthesis abruptly opens/closes the audio device.
+ *
+ * MUST be called from a user gesture (e.g. first button tap) for the
+ * AudioContext to work. Call warmAudio() once on the first user interaction.
+ */
+let warmCtx: AudioContext | null = null;
+let warmOsc: OscillatorNode | null = null;
+let warmGain: GainNode | null = null;
+
+export function warmAudio() {
+  if (warmCtx) {
+    if (warmCtx.state === "suspended") warmCtx.resume();
+    return;
+  }
+  try {
+    warmCtx = new AudioContext();
+    if (warmCtx.state === "suspended") warmCtx.resume();
+
+    // Continuous silent sine wave at 1Hz — keeps the audio device open
+    // but produces no audible output (gain = 0)
+    warmOsc = warmCtx.createOscillator();
+    warmOsc.frequency.value = 1; // 1Hz — far below human hearing
+    warmGain = warmCtx.createGain();
+    warmGain.gain.value = 0; // completely silent
+    warmOsc.connect(warmGain);
+    warmGain.connect(warmCtx.destination);
+    warmOsc.start();
+  } catch {
+    // AudioContext not available
+  }
+}
+
 export function waitForVoices(timeoutMs = 2000): Promise<void> {
   if (voicesReady) return Promise.resolve();
   return new Promise((res) => {
@@ -106,74 +141,12 @@ export function hasEnglishVoice(): boolean { return !!enVoice; }
 export function voicesResolved(): boolean { return voicesReady; }
 export function getEnglishVoiceName(): string | null { return enVoice?.name ?? null; }
 
-/**
- * Audio "keepalive" — keeps the audio output path open during TTS playback
- * to prevent the speaker click/pop that occurs when speechSynthesis
- * abruptly stops the audio device at the end of an utterance.
- *
- * We play a near-silent (–60dB) dithering buffer through an AudioContext
- * that loops continuously. The audio device stays "warm" so when TTS ends,
- * there's no abrupt release. We stop the keepalive 300ms after TTS ends.
- */
-let keepaliveCtx: AudioContext | null = null;
-let keepaliveSrc: AudioBufferSourceNode | null = null;
-let keepaliveGain: GainNode | null = null;
-
-function startAudioKeepalive() {
-  try {
-    if (!keepaliveCtx || keepaliveCtx.state === "closed") {
-      keepaliveCtx = new AudioContext();
-    }
-    if (keepaliveCtx.state === "suspended") keepaliveCtx.resume();
-
-    // Create a 1-second near-silent buffer with dithering noise
-    const sr = keepaliveCtx.sampleRate;
-    const buf = keepaliveCtx.createBuffer(1, sr, sr); // 1 second
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < data.length; i++) {
-      // –60dB white noise — inaudible but keeps the output path alive
-      data[i] = (Math.random() * 2 - 1) * 0.0005;
-    }
-
-    keepaliveGain = keepaliveCtx.createGain();
-    keepaliveGain.gain.value = 1;
-
-    keepaliveSrc = keepaliveCtx.createBufferSource();
-    keepaliveSrc.buffer = buf;
-    keepaliveSrc.loop = true; // loop the 1-second buffer
-    keepaliveSrc.connect(keepaliveGain);
-    keepaliveGain.connect(keepaliveCtx.destination);
-    keepaliveSrc.start();
-  } catch {
-    // AudioContext not available — degrade silently
-  }
-}
-
-function stopAudioKeepalive() {
-  try {
-    if (keepaliveSrc) {
-      // Fade out over 50ms to avoid a pop from the keepalive itself
-      if (keepaliveGain && keepaliveCtx) {
-        const now = keepaliveCtx.currentTime;
-        keepaliveGain.gain.setValueAtTime(keepaliveGain.gain.value, now);
-        keepaliveGain.gain.linearRampToValueAtTime(0, now + 0.05);
-      }
-      keepaliveSrc.stop(keepaliveCtx?.currentTime + 0.06);
-      keepaliveSrc.onended = () => {
-        keepaliveSrc = null;
-        keepaliveGain = null;
-      };
-    }
-  } catch {
-    keepaliveSrc = null;
-    keepaliveGain = null;
-  }
-}
-
 export function speak(text: string, opts: SpeakOptions = {}) {
   if (typeof speechSynthesis === "undefined") return;
   try {
-    // Only cancel if something is actually speaking
+    // Ensure audio is warm before speaking
+    warmAudio();
+
     if (speakingNow) {
       speechSynthesis.cancel();
       speakingNow = false;
@@ -192,20 +165,14 @@ export function speak(text: string, opts: SpeakOptions = {}) {
     u.pitch = 1.0;
     u.volume = 1.0;
 
-    // Start the audio keepalive BEFORE speaking to keep the output path warm
-    startAudioKeepalive();
     speakingNow = true;
-
     u.onstart = () => { speakingNow = true; };
     u.onend = () => {
       speakingNow = false;
-      // Keep the audio path open briefly, then close it with a fade
-      setTimeout(() => stopAudioKeepalive(), 300);
       opts.onEnd?.();
     };
     u.onerror = () => {
       speakingNow = false;
-      setTimeout(() => stopAudioKeepalive(), 300);
       opts.onEnd?.();
     };
     speechSynthesis.speak(u);
@@ -227,7 +194,6 @@ export function cancelSpeech() {
     speechSynthesis.cancel();
   }
   speakingNow = false;
-  stopAudioKeepalive();
 }
 
 export function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }

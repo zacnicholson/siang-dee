@@ -1,14 +1,13 @@
 /**
- * On-device speech recognition — Whisper-primary architecture:
+ * On-device speech recognition — Web Speech primary, Whisper offline fallback.
  *
- * PRIMARY: transformers.js + Whisper-tiny (ONNX). Runs fully on-device,
- * works offline, no network needed. Tuned for short single-word recognition:
- *   - Limited max_new_tokens to prevent hallucination on silence
- *   - Shorter padding (1s instead of 30s) to reduce hallucination
- *   - Fuzzy matching to handle Whisper's transcription variants
+ * PRIMARY: Web Speech API (browser's built-in engine). Real-time, no model
+ * download, highly accurate for short single-word recognition. Works offline
+ * on iOS (OS downloads language pack); Chrome uses Google's online engine.
  *
- * SECONDARY (optional): Web Speech API. When available and network is working,
- * can provide a cross-check. Used as a secondary signal, not primary.
+ * FALLBACK: transformers.js + Whisper-tiny (ONNX). Loaded on-demand ONLY when
+ * Web Speech is unavailable or returned no transcript. Runs fully on-device,
+ * works offline. Requires a ~40MB download on first use.
  *
  * Both paths produce a word-level transcript → we map words to IPA phonemes
  * via the dictionary → feed to alignment + scoring.
@@ -43,12 +42,15 @@ let loadPromise: Promise<void> | null = null;
 
 const MODEL_ID = "Xenova/whisper-tiny.en";
 
-/** Returns true if the model hasn't been downloaded yet (first run). */
+/** Returns true if the model needs downloading AND Web Speech is unavailable.
+ *  When Web Speech is supported, we don't need the model upfront — it's only
+ *  a fallback for when Web Speech fails or is unsupported. */
 export function needsModelDownload(): boolean {
-  return !ready && !loadPromise;
+  if (ready || loadPromise) return false;
+  return !isWebSpeechSupported();
 }
 
-/** Pre-load the model without recording, calling onProgress as it downloads. */
+/** Pre-load the Whisper fallback model. Only call when Web Speech is NOT supported. */
 export async function preloadModel(onProgress?: (p: number) => void): Promise<void> {
   if (ready) { onProgress?.(1); return; }
   const check = setInterval(() => { onProgress?.(progress); }, 200);
@@ -187,7 +189,7 @@ function makeApi(): Recognizer {
     },
 
     recognizeWords: async (pcm: Float32Array, webSpeechTranscript?: string) => {
-      // If we have a Web Speech transcript AND it looks credible, use it as primary
+      // PRIMARY: Web Speech transcript (if available)
       if (webSpeechTranscript) {
         const words = webSpeechTranscript.trim().split(/\s+/).filter(Boolean);
         return words.map((w, i) => ({
@@ -198,7 +200,7 @@ function makeApi(): Recognizer {
         }));
       }
 
-      // PRIMARY: Whisper path
+      // FALLBACK: Whisper path — load on-demand only when Web Speech failed
       if (!pipeline) await ensureWhisperLoaded();
       if (!pipeline) throw new Error("Failed to load Whisper model");
 

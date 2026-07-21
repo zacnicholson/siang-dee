@@ -7,9 +7,11 @@ import type { Phoneme } from "./phonemes";
 
 export const EXPANDED_DICT: Record<string, Phoneme[]> = {
   // Tier 1: top 100 most common English words
-  the: ["ð", "ə"], be: ["b", "iː"], to: ["t", "uː"], of: ["ɒ", "v"],
+  the: ["ð", "ə"], be: ["b", "iː"],
+  // 'to', 'of', 'for', 'can' are in the base dict with E14 weak forms.
+  // Don't override them here with strong forms.
   and: ["æ", "n", "d"], in: ["ɪ", "n"], that: ["ð", "æ", "t"],
-  have: ["h", "æ", "v"], i: ["aɪ"], it: ["ɪ", "t"], for: ["f", "ɔː"],
+  have: ["h", "æ", "v"], i: ["aɪ"], it: ["ɪ", "t"],
   not: ["n", "ɒ", "t"], on: ["ɒ", "n"], with: ["w", "ɪ", "ð"],
   he: ["h", "iː"], as: ["æ", "z"], you: ["j", "uː"], do: ["d", "uː"],
   at: ["æ", "t"], this: ["ð", "ɪ", "s"], but: ["b", "ʌ", "t"],
@@ -21,7 +23,8 @@ export const EXPANDED_DICT: Record<string, Phoneme[]> = {
   so: ["s", "əʊ"], up: ["ʌ", "p"], out: ["aʊ", "t"],
   if: ["ɪ", "f"], about: ["ə", "b", "aʊ", "t"], who: ["h", "uː"],
   get: ["ɡ", "e", "t"], which: ["w", "ɪ", "tʃ"], me: ["m", "iː"],
-  when: ["w", "e", "n"], make: ["m", "eɪ", "k"], can: ["k", "æ", "n"],
+  when: ["w", "e", "n"], make: ["m", "eɪ", "k"],
+  // 'can' weak form is in the base dict (E14 target).
   like: ["l", "aɪ", "k"], time: ["t", "aɪ", "m"], no: ["n", "əʊ"],
   just: ["dʒ", "ʌ", "s", "t"], him: ["h", "ɪ", "m"], know: ["n", "əʊ"],
   take: ["t", "eɪ", "k"], into: ["ɪ", "n", "t", "uː"],

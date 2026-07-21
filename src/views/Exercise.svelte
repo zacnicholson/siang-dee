@@ -1,16 +1,18 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { route, currentExerciseId, settings } from "../stores/app";
-  import { getExercise, EXERCISES, type Exercise } from "../data/exercises";
+  import { getExercise, EXERCISES, isSuprasegmentalOnly, type Exercise } from "../data/exercises";
   import { sentenceToPhonemes } from "../lib/phonology/dictionary";
   import { detectErrors, type Phoneme, type DetectedError } from "../lib/phonology";
   import { createMicRecorder, pcmToWav, type MicRecorder } from "../lib/audio/mic";
+  import { playAudioUrlWithFadeOut } from "../lib/audio/playback";
   import { acquireWakeLock, releaseWakeLock } from "../lib/audio/wakelock";
   import { pcmToBars, syntheticReferenceBars } from "../lib/audio/waveform";
   import WaveformCompare from "../components/WaveformCompare.svelte";
   import MouthDiagram from "../components/MouthDiagram.svelte";
   import { getRecognizer, needsModelDownload, preloadModel, type RecognizedPhoneme, type Recognizer } from "../lib/audio/recognizer";
   import type { WebSpeechController } from "../lib/audio/webspeech-recognizer";
+import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   import { buildFeedback, summaryTh } from "../lib/feedback/templates";
   import { speak, speakSequence, cancelSpeech, hasThaiVoice, waitForVoices } from "../lib/tts/speech";
   import { saveAttempt } from "../lib/storage/db";
@@ -72,7 +74,8 @@
     score = null; errors = []; phonemeScores = []; spokenWords = "";
     hasResult = false; canPlayYours = false;
 
-    // First run: model needs downloading — show the download card first
+    // First run: only show model download if Web Speech is NOT supported
+    // (Web Speech is primary; Whisper is offline-only fallback)
     if (needsModelDownload()) {
       showModelDl = true;
       modelDlPhase = "downloading";
@@ -144,8 +147,9 @@
 
     try {
       const rec = await getRecognizer();
-      // If Web Speech failed and we need to load Whisper on-demand, show progress
-      if (!wsTranscript && rec.loadProgress() < 1) {
+      // Only show download progress if we're loading the Whisper fallback
+      // (Web Speech is primary — no download needed)
+      if (!wsTranscript && isWebSpeechSupported() === false && rec.loadProgress() < 1) {
         showModelDl = true;
         modelDlPhase = "downloading";
         modelDlProgress = 0;
@@ -245,7 +249,10 @@
       }
     });
   }
-  function playYours() { if (lastAudioUrl) new Audio(lastAudioUrl).play().catch(() => {}); }
+  function playYours() {
+    if (!lastAudioUrl) return;
+    playAudioUrlWithFadeOut(lastAudioUrl).catch(() => {});
+  }
 
   function retry() {
     cancelSpeech();
@@ -433,6 +440,13 @@
           <span class="t-micro fg-muted" lang="th">ไม่ได้ยินชัด ลองใหม่อีกครั้ง</span>
         </div>
       {/if}
+    </div>
+  {/if}
+
+  {#if isSuprasegmentalOnly(exercise) && recState === "result"}
+    <div class="coach-note">
+      <span class="t-body-lg" lang="th">{ERROR_CATEGORIES[exercise.errorIds[0] as ErrorId]?.explainTh ?? ""}</span>
+      <span class="t-caption fg-muted" lang="th">หมายเหตุ: เสียงประกอบเช่นนี้ต้องฝึกกับครู — แอปฟังเสียงพยัญชนะได้ แต่จังหวะและเน้นเสียงต้องใช้หูคน</span>
     </div>
   {/if}
 
@@ -704,6 +718,12 @@
   .act-btn.primary:hover { opacity: 0.9; }
 
   .err-msg { text-align: center; }
+
+  .coach-note {
+    width: 100%; background: var(--c-surface); border: 1px solid var(--c-rule);
+    border-radius: var(--r-0); padding: var(--s-5); display: flex;
+    flex-direction: column; gap: var(--s-2); text-align: center;
+  }
 
   /* Model download card */
   .model-dl-card {

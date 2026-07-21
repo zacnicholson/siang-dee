@@ -49,8 +49,10 @@ export const IPA_DICT: Record<string, Phoneme[]> = {
   caught: ["k", "ɔː", "t"], cot: ["k", "ɒ", "t"],
   // E11 vowel length
   sheep: ["ʃ", "iː", "p"], ship: ["ʃ", "ɪ", "p"],
-  // E14 weak forms
-  can: ["k", "ə", "n"], of: ["ə", "v"], to: ["t", "ə"],
+  // E14 weak forms (also used as exercise targets)
+  can: ["k", "ə", "n"], of: ["ə", "v"], to: ["t", "ə"], for: ["f", "ə"],
+  // strong forms (for recognition — when user says the full vowel)
+  can_strong: ["k", "æ", "n"], of_strong: ["ɒ", "v"], to_strong: ["t", "uː"], for_strong: ["f", "ɔː"],
   // connectors / common
   while: ["w", "aɪ", "l"], is: ["ɪ", "z"], a: ["ə"],
   isnt: ["ɪ", "z", "ə", "n", "t"],

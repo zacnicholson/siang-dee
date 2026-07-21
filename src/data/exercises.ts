@@ -4,6 +4,7 @@
  * one or more ErrorIds and has a target word/sentence + Thai gloss.
  */
 import type { ErrorId } from "../lib/phonology/errors";
+import { ERROR_CATEGORIES } from "../lib/phonology/errors";
 
 export type ExerciseType = "word" | "sentence" | "minimalpair";
 
@@ -197,6 +198,14 @@ export const EXERCISES: Exercise[] = [
 
 export function exercisesByError(eid: ErrorId): Exercise[] {
   return EXERCISES.filter((e) => e.errorIds.includes(eid));
+}
+
+/** Check if an exercise is purely suprasegmental (E12/E13/E15 — not detectable
+ *  from phonemes alone). These show a coach note instead of a score. */
+export function isSuprasegmentalOnly(exercise: Exercise): boolean {
+  return exercise.errorIds.length > 0 && exercise.errorIds.every(
+    (eid) => !ERROR_CATEGORIES[eid]?.segmental
+  );
 }
 
 export function getExercise(id: string): Exercise | undefined {

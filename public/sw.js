@@ -1,6 +1,6 @@
 // Siang Dee service worker — offline app shell (SPEC §9).
 // Cache-first for static assets; network-first for nothing (no dynamic backend in MVP).
-const CACHE = "siang-dee-v2";
+const CACHE = "siang-dee-v3";
 const APP_SHELL = [
   "/",
   "/index.html",
