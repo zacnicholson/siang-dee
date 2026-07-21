@@ -227,9 +227,36 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
       const target = exercise.targetPhonemes as Phoneme[];
 
       // Recognition failure: Whisper/Web Speech returned no usable phonemes.
-      // The user probably spoke correctly but the recognizer didn't catch it.
-      // Show "try again" instead of a false 0/100 score.
+      // But the user clearly spoke — don't trap them in an endless "try again"
+      // loop. If the PCM has real audio energy, give a best-effort score so
+      // they can see their progress and move on. This matters when Web Speech
+      // is offline (Chrome network down) and Whisper hallucinates.
       if (spoken.length === 0) {
+        const pcmEnergy = computePcmEnergy(pcmData);
+        const recDurationSec = pcmData.length / 16000;
+        if (pcmEnergy > 0.01 && recDurationSec >= 0.5) {
+          // User spoke but recognition failed. Give a neutral score with
+          // a note that recognition had trouble — let them practice.
+          console.log("[Siang Dee] Recognition failed but PCM has energy — best-effort scoring");
+          score = 50;
+          errors = [];
+          phonemeScores = target.map(() => 50);
+          spokenWords = "";
+          attemptCount++;
+          bestScoreThisExercise = Math.max(bestScoreThisExercise, 50);
+          try {
+            await saveAttempt(
+              { id: `att-${Date.now()}`, exerciseId: exercise.id, timestamp: Date.now(),
+                targetPhonemes: target, spokenPhonemes: [], errors: [], score: 50 },
+              pcmToWav(pcmData),
+            );
+          } catch { /* storage is best-effort */ }
+          recState = "result";
+          hasResult = true;
+          canPlayYours = true;
+          animateScoreReveal(50);
+          return;
+        }
         errorMsg = t(lang, "unclear");
         recState = "idle";
         return;
@@ -243,6 +270,28 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
       // Also catch total mismatch: 0 matches + low confidence means the
       // recognizer heard something completely different from the target.
       if (result.matches === 0 && confs.every((c) => c < 0.5)) {
+        const pcmEnergy = computePcmEnergy(pcmData);
+        const recDurationSec = pcmData.length / 16000;
+        if (pcmEnergy > 0.01 && recDurationSec >= 0.5) {
+          console.log("[Siang Dee] 0 matches but PCM has energy — best-effort scoring");
+          score = 50;
+          errors = [];
+          phonemeScores = target.map(() => 50);
+          attemptCount++;
+          bestScoreThisExercise = Math.max(bestScoreThisExercise, 50);
+          try {
+            await saveAttempt(
+              { id: `att-${Date.now()}`, exerciseId: exercise.id, timestamp: Date.now(),
+                targetPhonemes: target, spokenPhonemes: spoken, errors: [], score: 50 },
+              pcmToWav(pcmData),
+            );
+          } catch { /* storage is best-effort */ }
+          recState = "result";
+          hasResult = true;
+          canPlayYours = true;
+          animateScoreReveal(50);
+          return;
+        }
         errorMsg = t(lang, "unclear");
         recState = "idle";
         return;
@@ -417,6 +466,14 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   }
 
   // Tap-to-start/tap-to-stop: press-and-hold is fragile on trackpads
+  // Compute RMS energy of PCM audio — used to detect if the user actually
+  // spoke when recognition fails (Web Speech down + Whisper hallucinating).
+  function computePcmEnergy(pcm: Float32Array): number {
+    let energy = 0;
+    for (let i = 0; i < pcm.length; i++) energy += pcm[i] * pcm[i];
+    return Math.sqrt(energy / Math.max(1, pcm.length));
+  }
+
   // (pointerleave fires on the slightest finger shift, killing the recording
   // before the user speaks). A tap toggle is reliable on all platforms.
   function onRecordTap(e: PointerEvent) {
@@ -585,6 +642,11 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
         {/each}
       </div>
     {/if}
+  {:else if recState === "result" && errors.length === 0 && (!spokenWords || spokenWords.length === 0) && score === 50}
+    <div class="success-msg" style="color: var(--c-warn)">
+      <IconAlertCircle size={18} stroke-width={2} />
+      <span class="t-body-lg" lang="th">ไม่สามารถวิเคราะห์ได้ชัดเจน — ลองพูดใหม่ในที่เงียบ</span>
+    </div>
   {:else if recState === "result" && errors.length === 0}
     <div class="success-msg">
       <IconCheck size={18} stroke-width={2} />
@@ -733,7 +795,7 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
       <IconAlertCircle size={18} stroke-width={2} class="err-icon" />
       <div class="err-text">
         <span class="t-body" lang="th">{errorMsg}</span>
-        <span class="t-micro fg-muted" lang="th">ปล่อยปุ่มในที่เงียบแล้วลองใหม่</span>
+        <span class="t-micro fg-muted" lang="th">กดปุ่มไมค์แล้วพูดในที่เงียบ</span>
       </div>
       <button class="err-retry" onclick={retry} lang="th">
         <IconRotateCcw size={16} stroke-width={2} /> {t(lang, "tryAgain")}
