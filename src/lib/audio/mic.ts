@@ -116,8 +116,28 @@ export async function createMicRecorder(): Promise<MicRecorder> {
   };
 }
 
-/** Encode Float32 PCM → WAV Blob (16-bit) for storage/replay in IndexedDB. */
+/** Encode Float32 PCM → WAV Blob (16-bit) for storage/replay in IndexedDB.
+ *  Applies a short fade-out to the last 5ms to prevent speaker clicks/pops
+ *  from an abrupt discontinuity at the end of the recording. */
 export function pcmToWav(pcm: Float32Array, sampleRate = TARGET_SR): Blob {
+  // Apply a 5ms linear fade-out to the tail to prevent speaker pops.
+  // The click happens because the recording ends mid-waveform at full
+  // amplitude — the sudden jump to zero creates an audible transient.
+  const fadeSamples = Math.min(Math.floor(sampleRate * 0.005), pcm.length); // 5ms
+  if (fadeSamples > 0) {
+    for (let i = 0; i < fadeSamples; i++) {
+      const gain = 1.0 - (i / fadeSamples);
+      pcm[pcm.length - fadeSamples + i] *= gain;
+    }
+  }
+  // Also fade-in the first 2ms to prevent any startup click
+  const fadeInSamples = Math.min(Math.floor(sampleRate * 0.002), pcm.length);
+  if (fadeInSamples > 0) {
+    for (let i = 0; i < fadeInSamples; i++) {
+      pcm[i] *= i / fadeInSamples;
+    }
+  }
+
   const buffer = new ArrayBuffer(44 + pcm.length * 2);
   const view = new DataView(buffer);
   const writeStr = (off: number, s: string) => {
