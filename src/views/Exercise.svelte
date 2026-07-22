@@ -17,6 +17,7 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
   import { speak, speakSequence, cancelSpeech, hasThaiVoice, waitForVoices, warmAudio } from "../lib/tts/speech";
   import { saveAttempt, getRecentAttempts, getAudio, type Attempt } from "../lib/storage/db";
   import { pickNextAdaptive } from "../lib/goals/adaptive";
+  import { pickNextSpaced } from "../lib/goals/srs";
   import { t, type Lang } from "../lib/i18n";
   import { ERROR_CATEGORIES, type ErrorId } from "../lib/phonology";
   import {
@@ -423,15 +424,29 @@ import { isWebSpeechSupported } from "../lib/audio/webspeech-recognizer";
     // keep hasResult true — prior chips stay visible for comparison
     // keep attemptCount + bestScoreThisExercise — they track progress on this word
   }
-  function nextEx() {
+  async function nextEx() {
     cancelSpeech();
-    // Adaptive: if we have a score, use it to pick the next difficulty
+    // Spaced repetition: schedule reviews based on score history.
+    // Falls back to adaptive difficulty for brand-new exercises.
     if (score !== null && exercise.errorIds.length > 0) {
-      const next = pickNextAdaptive(exercise.id, score, exercise.errorIds[0]);
+      let next;
+      // Use spaced repetition when we have practice history
+      try {
+        next = await pickNextSpaced(exercise.id, exercise.errorIds[0] as ErrorId);
+      } catch {
+        next = pickNextAdaptive(exercise.id, score, exercise.errorIds[0]);
+      }
       exercise = next;
     } else {
-      const idx = EXERCISES.findIndex((e) => e.id === exercise.id);
-      exercise = EXERCISES[(idx + 1) % EXERCISES.length];
+      // For custom exercises or no-score first try, pick from SRS or adaptive
+      let next;
+      try {
+        next = await pickNextSpaced(exercise.id, (exercise.errorIds[0] as ErrorId) ?? null);
+      } catch {
+        const idx = EXERCISES.findIndex((e) => e.id === exercise.id);
+        next = idx >= 0 ? EXERCISES[(idx + 1) % EXERCISES.length] : EXERCISES[0];
+      }
+      exercise = next;
     }
     currentExerciseId.set(exercise.id);
     recState = "idle"; score = null; displayScore = 0; scoreBarFill = 0; errors = []; phonemeScores = [];

@@ -12,6 +12,8 @@ export { default as IconSquare } from "lucide-svelte/icons/square";
 export { default as IconVolume2 } from "lucide-svelte/icons/volume-2";
 export { default as IconGauge } from "lucide-svelte/icons/gauge";
 export { default as IconChevronRight } from "lucide-svelte/icons/chevron-right";
+export { default as IconLock } from "lucide-svelte/icons/lock";
+export { default as IconPlus } from "lucide-svelte/icons/plus";
 export { default as IconRotateCcw } from "lucide-svelte/icons/rotate-ccw";
 export { default as IconLoader2 } from "lucide-svelte/icons/loader-2";
 export { default as IconTrendingUp } from "lucide-svelte/icons/trending-up";

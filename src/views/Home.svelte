@@ -5,9 +5,11 @@
   import { getAllProgress } from "../lib/storage/db";
   import { ERROR_CATEGORIES, type ErrorId } from "../lib/phonology";
   import { t, type Lang } from "../lib/i18n";
-  import { IconChevronRight } from "../lib/ui/Icons";
+  import { IconChevronRight, IconLock, IconPlus } from "../lib/ui/Icons";
   import { getDailyStats, type DailyStats } from "../lib/goals/daily";
   import { searchWords, makeExerciseFromWord } from "../lib/goals/search";
+  import { getCategoryStatuses, countMastered, type CategoryStatus } from "../lib/goals/progression";
+  import { createCustomExercise, validateCustomSentence } from "../lib/goals/custom-sentence";
 
   let lang: Lang = $state("th");
   let totalPracticed = $state(0);
@@ -17,6 +19,12 @@
   let daily = $state<DailyStats>({ todayCount: 0, goal: 10, streakDays: 0, goalMet: false });
   let searchQuery = $state("");
   let searchResults = $state<Array<{ word: string; phonemes: string[]; thai: string | null }>>([]);
+  let categoryStatuses = $state<CategoryStatus[]>([]);
+  let masteredCount = $state(0);
+  let customSentence = $state("");
+  let customThai = $state("");
+  let customError = $state<string | null>(null);
+  let customUnknown = $state<string[]>([]);
 
   $effect(() => {
     if (searchQuery.trim().length >= 2) {
@@ -46,6 +54,9 @@
       (window as any).__deferredPrompt = e;
       installed = true;
     });
+    // Load progression
+    categoryStatuses = await getCategoryStatuses();
+    masteredCount = countMastered(categoryStatuses);
   });
 
   function startSuggested() {
@@ -60,6 +71,27 @@
     const list = exercisesByError(eid);
     const ex = list[0] ?? EXERCISES[0];
     currentExerciseId.set(ex.id);
+    route.set("exercise");
+  }
+
+  function startCategoryIfUnlocked(status: CategoryStatus) {
+    if (!status.unlocked) return;
+    startCategory(status.errorId);
+  }
+
+  function handleCustomSentence() {
+    customError = null;
+    customUnknown = [];
+    const validation = validateCustomSentence(customSentence);
+    if (!validation.valid) {
+      customError = validation.error ?? "ไม่ถูกต้อง";
+      return;
+    }
+    const result = createCustomExercise({ text: customSentence, thai: customThai || undefined });
+    customUnknown = result.unknownWords;
+    // Store the custom exercise so the Exercise view can find it
+    (window as any).__customExercise = result.exercise;
+    currentExerciseId.set(result.exercise.id);
     route.set("exercise");
   }
 
@@ -134,6 +166,38 @@
     <IconChevronRight size={20} stroke-width={2} class="sug-arrow" />
   </button>
 
+  <!-- Custom sentence builder — type any sentence, get a drill -->
+  <div class="custom-zone">
+    <span class="t-micro fg-muted" lang="th">พิมพ์ประโยคเอง</span>
+    <input
+      type="text"
+      class="custom-input"
+      placeholder="Type any English sentence..."
+      lang="en"
+      bind:value={customSentence}
+      onkeydown={(e) => { if (e.key === "Enter" && customSentence.trim()) handleCustomSentence(); }}
+      aria-label="Custom English sentence"
+    />
+    <input
+      type="text"
+      class="custom-input thai-input"
+      placeholder="คำแปลภาษาไทย (ไม่บังคับ)"
+      lang="th"
+      bind:value={customThai}
+      onkeydown={(e) => { if (e.key === "Enter" && customSentence.trim()) handleCustomSentence(); }}
+      aria-label="Thai translation (optional)"
+    />
+    {#if customError}
+      <span class="custom-error t-caption" lang="th">{customError}</span>
+    {/if}
+    {#if customSentence.trim().length >= 3}
+      <button class="custom-btn" onclick={handleCustomSentence}>
+        <IconPlus size={16} stroke-width={2} />
+        <span lang="th">สร้างแบบฝึก</span>
+      </button>
+    {/if}
+  </div>
+
   <!-- Minimal pair drill entry -->
   <button class="pair-entry rule-b" onclick={() => route.set("minimalpair")}>
     <span class="t-body-lg" lang="th">คู่เสียงน้อย</span>
@@ -143,16 +207,42 @@
 
   <hr class="rule" />
 
-  <!-- 15 error categories — hairline list, not cards -->
+  <!-- 15 error categories — with progression/lock state -->
   <div class="cats">
-    <span class="t-micro fg-muted" lang="th">หมวดฝึก</span>
+    <div class="cats-header">
+      <span class="t-micro fg-muted" lang="th">หมวดฝึก</span>
+      {#if masteredCount > 0}
+        <span class="t-micro fg-muted" lang="th">เก่งแล้ว {masteredCount}/15</span>
+      {/if}
+    </div>
     <div class="cat-list">
-      {#each allErrorIds as eid}
-        {@const cat = ERROR_CATEGORIES[eid]}
-        <button class="cat-row rule-b" onclick={() => startCategory(eid)}>
-          <span class="cat-tag">{eid}</span>
-          <span class="cat-name t-body" lang="th">{cat.nameTh}</span>
-          <IconChevronRight size={16} stroke-width={2} class="cat-arrow" />
+      {#each categoryStatuses as status}
+        <button
+          class="cat-row rule-b"
+          class:locked={!status.unlocked}
+          onclick={() => startCategoryIfUnlocked(status)}
+          disabled={!status.unlocked}
+        >
+          <span class="cat-tag" class:mastered3={status.mastery >= 3} class:mastered2={status.mastery >= 2 && status.mastery < 3}>
+            {status.unlocked ? status.errorId : "🔒"}
+          </span>
+          <span class="cat-name t-body" lang="th">{status.nameTh}</span>
+          {#if status.unlocked && status.attempts > 0}
+            <span class="cat-score t-micro fg-muted">
+              {#if status.mastery >= 3}
+                ★
+              {:else if status.mastery >= 2}
+                ✓
+              {:else}
+                {status.lastScore}
+              {/if}
+            </span>
+          {/if}
+          {#if !status.unlocked}
+            <IconLock size={14} stroke-width={2} class="cat-lock" />
+          {:else}
+            <IconChevronRight size={16} stroke-width={2} class="cat-arrow" />
+          {/if}
         </button>
       {/each}
     </div>
@@ -199,6 +289,36 @@
   .search-word { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .search-ipa { flex-shrink: 0; }
   .search-arrow { color: var(--c-fg-muted); flex-shrink: 0; }
+
+  /* Custom sentence builder */
+  .custom-zone { display: flex; flex-direction: column; gap: var(--s-2); }
+  .custom-input {
+    width: 100%; background: var(--c-surface); border: 1px solid var(--c-rule);
+    border-radius: var(--r-0); padding: var(--s-4); font-size: 15px;
+    font-family: var(--font-body); color: var(--c-fg); min-height: 44px;
+    transition: border-color 120ms var(--ease-out-quint);
+  }
+  .custom-input:focus { border-color: var(--c-accent); }
+  .custom-input::placeholder { color: var(--c-fg-muted); }
+  .thai-input { font-family: var(--font-thai); }
+  .custom-error { color: var(--c-danger); }
+  .custom-btn {
+    display: flex; align-items: center; gap: var(--s-2);
+    background: var(--c-accent); color: white; border: none;
+    border-radius: var(--r-0); padding: var(--s-3) var(--s-5);
+    font-size: 14px; font-weight: 600; align-self: flex-start;
+    cursor: pointer; transition: opacity 120ms var(--ease-out-quint);
+  }
+  .custom-btn:hover { opacity: 0.9; }
+
+  /* Progression */
+  .cats-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--s-2); }
+  .cat-row.locked { opacity: 0.5; }
+  .cat-row.locked:hover { color: var(--c-fg-muted); }
+  .cat-tag.mastered2 { border-color: var(--c-success); color: var(--c-success); }
+  .cat-tag.mastered3 { background: var(--c-success); border-color: var(--c-success); color: white; }
+  .cat-score { width: 24px; text-align: right; color: var(--c-fg-muted); }
+  .cat-lock { color: var(--c-fg-muted); flex-shrink: 0; }
 
   /* Minimal pair entry */
   .pair-entry {

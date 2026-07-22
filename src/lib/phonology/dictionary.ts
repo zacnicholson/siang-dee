@@ -8,6 +8,7 @@
  */
 import type { Phoneme } from "./phonemes";
 import { EXPANDED_DICT } from "./dictionary-expanded";
+import { g2p } from "./g2p";
 
 export const IPA_DICT: Record<string, Phoneme[]> = {
   ...EXPANDED_DICT,
@@ -74,7 +75,7 @@ export function lookupIPA(word: string): Phoneme[] | undefined {
 export function sentenceToPhonemes(sentence: string): {
   phonemes: Phoneme[];
   boundaries: number[]; // last target index of each word
-  missing: string[];     // words not in the dictionary
+  missing: string[];     // words not in the dictionary AND G2P couldn't handle
 } {
   const words = sentence.toLowerCase().replace(/[.,!?]/g, "").split(/\s+/).filter(Boolean);
   const phonemes: Phoneme[] = [];
@@ -82,7 +83,14 @@ export function sentenceToPhonemes(sentence: string): {
   const missing: string[] = [];
   for (const w of words) {
     const p = lookupIPA(w);
-    if (!p) { missing.push(w); continue; }
+    if (!p) {
+      // Try G2P fallback
+      const g2pResult = g2p(w);
+      if (!g2pResult) { missing.push(w); continue; }
+      for (const ph of g2pResult) phonemes.push(ph);
+      boundaries.push(phonemes.length - 1);
+      continue;
+    }
     for (const ph of p) phonemes.push(ph);
     boundaries.push(phonemes.length - 1);
   }
